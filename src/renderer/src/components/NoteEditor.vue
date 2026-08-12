@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '../stores/app'
-import { buildNoteMarkdown, countExamWords, parseNoteMarkdown } from '../utils/exam'
+import { buildNoteMarkdown, countExamWords, parseNoteMarkdown, stripLeadingTitleHeading } from '../utils/exam'
 import MarkdownRichEditor from './MarkdownRichEditor.vue'
 
 const props = defineProps<{
@@ -78,14 +78,20 @@ async function save(): Promise<void> {
   }
   store.saving = true
   try {
-    const content = buildNoteMarkdown(title.value, body.value)
+    const noteTitle = title.value.trim() || '未命名笔记'
+    const cleanedBody = stripLeadingTitleHeading(body.value, noteTitle)
+    if (cleanedBody !== body.value) {
+      body.value = cleanedBody
+      editorKey.value += 1
+    }
+    const content = buildNoteMarkdown(noteTitle, cleanedBody)
     const meta = await window.api.writeNote({
       rootPath: store.rootPath,
       subjectId: store.subjectId,
       kind: 'notes',
       fileName: currentName.value,
       content,
-      title: title.value.trim() || '未命名笔记',
+      title: noteTitle,
     })
     currentName.value = meta.fileName
     dirty.value = false

@@ -115,16 +115,39 @@ export function parseEssayMarkdown(content: string): EssayParts {
 
 export function buildNoteMarkdown(title: string, body: string): string {
   const t = title.trim() || '未命名笔记'
+  // 标题只写 frontmatter，正文不再重复插入 # 标题，避免每次保存叠一层
+  const cleanedBody = stripLeadingTitleHeading(body, t)
   return `---
 title: "${t.replace(/"/g, '\\"')}"
 type: note
 updatedAt: "${new Date().toISOString()}"
 ---
 
-# ${t}
-
-${body.trim()}
+${cleanedBody}
 `
+}
+
+/** 去掉正文开头与笔记标题相同的一级标题（可连续多行，兼容历史脏数据） */
+export function stripLeadingTitleHeading(body: string, title: string): string {
+  let text = body.replace(/^\uFEFF/, '').replace(/^\s+/, '')
+  const t = title.trim()
+  if (!t) return text.trim()
+  // 匹配：# 标题 / #标题 ，允许重复多行
+  const re = new RegExp(
+    `^(?:#\\s*${escapeRegExp(t)}\\s*(?:\\r?\\n)+)+`,
+    'i',
+  )
+  text = text.replace(re, '')
+  // 兼容 turndown 可能留下的单独一行同名标题
+  const single = new RegExp(`^#\\s*${escapeRegExp(t)}\\s*$`, 'im')
+  if (single.test(text.split(/\r?\n/, 1)[0] || '')) {
+    text = text.replace(single, '').replace(/^\s+/, '')
+  }
+  return text.trim()
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 export function parseNoteMarkdown(content: string): { title: string; body: string } {
@@ -136,10 +159,13 @@ export function parseNoteMarkdown(content: string): { title: string; body: strin
     if (titleLine) title = titleLine[1].trim().replace(/^["']|["']$/g, '')
     rest = content.slice(fm[0].length)
   }
-  const h1 = rest.match(/^#\s+(.+)\r?\n?/)
+  const h1 = rest.match(/^#\s+(.+?)\s*(?:\r?\n|$)/)
   if (h1) {
     if (!title) title = h1[1].trim()
     rest = rest.slice(h1[0].length)
   }
-  return { title: title || '未命名笔记', body: rest.replace(/^\s+/, '') }
+  const resolvedTitle = title || '未命名笔记'
+  // 去掉正文顶部重复的主标题（历史多次保存产生的脏数据）
+  const body = stripLeadingTitleHeading(rest, resolvedTitle)
+  return { title: resolvedTitle, body }
 }
