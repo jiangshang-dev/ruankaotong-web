@@ -1,0 +1,62 @@
+{
+  "name": "ruankaotong",
+  "version": "1.0.0",
+  "description": "软考备考笔记桌面端（Electron + Vue3 + TypeScript）",
+  "main": "./out/main/index.js",
+  "author": "ruankaotong",
+  "license": "MIT",
+  "scripts": {
+    "dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
+    "build": "env -u ELECTRON_RUN_AS_NODE electron-vite build",
+    "preview": "env -u ELECTRON_RUN_AS_NODE electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "dist": "npm run build && env -u ELECTRON_RUN_AS_NODE electron-builder",
+    "dist:mac": "npm run build && env -u ELECTRON_RUN_AS_NODE electron-builder --mac dmg",
+    "dist:win": "npm run build && env -u ELECTRON_RUN_AS_NODE electron-builder --win nsis portable"
+  },
+  "dependencies": {
+    "marked": "^18.0.9",
+    "pinia": "^3.0.3",
+    "turndown": "^7.2.4",
+    "vue": "^3.5.18",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/tsconfig": "^1.0.1",
+    "@electron-toolkit/utils": "^4.0.0",
+    "@types/node": "^22.17.0",
+    "@types/turndown": "^5.0.6",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "electron": "^37.2.5",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^4.0.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.0.6",
+    "vue-tsc": "^3.0.5"
+  },
+  "build": {
+    "appId": "com.ruankaotong.app",
+    "productName": "软考通",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.education"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
+  }
+}
