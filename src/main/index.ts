@@ -9,9 +9,12 @@ import {
   renameNote,
   getAppConfig,
   saveAppConfig,
+  saveNoteImage,
+  readNoteImageDataUrl,
   type NoteMeta,
   type NoteContent,
   type AppConfig,
+  type SavedImage,
 } from './fs-service'
 
 const isDev = !app.isPackaged
@@ -157,6 +160,37 @@ app.whenReady().then(() => {
     if (!targetPath) return 'empty'
     return shell.openPath(targetPath)
   })
+
+  ipcMain.handle(
+    'notes:saveImage',
+    async (
+      _e,
+      payload: {
+        rootPath: string
+        subjectId: string
+        kind: 'notes' | 'essays'
+        bytes: Uint8Array
+        mimeType?: string
+      },
+    ): Promise<SavedImage> => {
+      return saveNoteImage(payload)
+    },
+  )
+
+  ipcMain.handle(
+    'notes:readImageDataUrl',
+    async (
+      _e,
+      payload: {
+        rootPath: string
+        subjectId: string
+        kind: 'notes' | 'essays'
+        relativePath: string
+      },
+    ): Promise<string | null> => {
+      return readNoteImageDataUrl(payload)
+    },
+  )
 
   createWindow()
 

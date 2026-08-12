@@ -61,6 +61,64 @@ export function saveAppConfig(userDataPath: string, config: AppConfig): AppConfi
 export function ensureSubjectDirs(rootPath: string, subjectId: string): void {
   ensureDir(join(rootPath, subjectId, 'notes'))
   ensureDir(join(rootPath, subjectId, 'essays'))
+  ensureDir(join(rootPath, subjectId, 'notes', 'assets'))
+  ensureDir(join(rootPath, subjectId, 'essays', 'assets'))
+}
+
+export interface SavedImage {
+  relativePath: string
+  dataUrl: string
+  fileName: string
+}
+
+function extFromMime(mime: string): string {
+  if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg'
+  if (mime.includes('webp')) return 'webp'
+  if (mime.includes('gif')) return 'gif'
+  return 'png'
+}
+
+/** 将剪贴板/粘贴的图片写入科目 assets 目录 */
+export function saveNoteImage(payload: {
+  rootPath: string
+  subjectId: string
+  kind: 'notes' | 'essays'
+  bytes: Uint8Array | Buffer
+  mimeType?: string
+}): SavedImage {
+  const { rootPath, subjectId, kind, mimeType = 'image/png' } = payload
+  ensureSubjectDirs(rootPath, subjectId)
+  const ext = extFromMime(mimeType)
+  const fileName = `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+  const relativePath = `assets/${fileName}`
+  const full = join(rootPath, subjectId, kind, relativePath)
+  const buf = Buffer.from(payload.bytes)
+  writeFileSync(full, buf)
+  const dataUrl = `data:${mimeType};base64,${buf.toString('base64')}`
+  return { relativePath, dataUrl, fileName }
+}
+
+/** 读取笔记相对路径图片为 data URL（用于编辑器回显） */
+export function readNoteImageDataUrl(payload: {
+  rootPath: string
+  subjectId: string
+  kind: 'notes' | 'essays'
+  relativePath: string
+}): string | null {
+  const rel = payload.relativePath.replace(/^(\.\/)+/, '').replace(/\\/g, '/')
+  if (!rel.startsWith('assets/') || rel.includes('..')) return null
+  const full = join(payload.rootPath, payload.subjectId, payload.kind, rel)
+  if (!existsSync(full)) return null
+  const buf = readFileSync(full)
+  const lower = rel.toLowerCase()
+  const mime = lower.endsWith('.jpg') || lower.endsWith('.jpeg')
+    ? 'image/jpeg'
+    : lower.endsWith('.webp')
+      ? 'image/webp'
+      : lower.endsWith('.gif')
+        ? 'image/gif'
+        : 'image/png'
+  return `data:${mime};base64,${buf.toString('base64')}`
 }
 
 function parseTitle(content: string, fileName: string): string {

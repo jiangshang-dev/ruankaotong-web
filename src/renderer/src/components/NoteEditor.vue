@@ -22,6 +22,16 @@ const dirty = ref(false)
 const status = ref('')
 const editorKey = ref(0)
 
+const media = computed(() =>
+  store.rootPath
+    ? {
+        rootPath: store.rootPath,
+        subjectId: store.subjectId,
+        kind: 'notes' as const,
+      }
+    : null,
+)
+
 const wordCount = computed(() => countExamWords(`${title.value}\n${body.value}`))
 
 async function load(): Promise<void> {
@@ -142,6 +152,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       <MarkdownRichEditor
         :key="editorKey"
         v-model="body"
+        :media="media"
         @change="markDirty"
       />
     </div>
@@ -150,7 +161,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       <span class="word-chip">
         字数 <b>{{ wordCount }}</b>
       </span>
-      <span class="status">中文按字、英文整词、标点各计 1；保存为 Markdown</span>
+      <span class="status">支持截图粘贴；中文按字、英文整词、标点各计 1</span>
     </div>
   </div>
 </template>

@@ -576,6 +576,7 @@ button {
   border-radius: 12px;
   background: #fff;
   overflow: hidden;
+  position: relative;
 }
 
 .md-toolbar {
@@ -623,10 +624,15 @@ button {
   border-color: var(--line);
 }
 
-.md-surface {
+.md-surface-wrap {
+  position: relative;
   flex: 1;
-  min-height: 280px;
+  min-height: 0;
   overflow: auto;
+}
+
+.md-surface {
+  min-height: 280px;
   padding: 16px 18px;
   outline: none;
   font-family: var(--font);
@@ -689,6 +695,51 @@ button {
 
 .md-surface u {
   text-decoration: underline;
+}
+
+.md-surface img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.6em 0;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  cursor: pointer;
+}
+
+.md-surface img.is-selected {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.img-resize-box {
+  position: absolute;
+  pointer-events: none;
+  border: 2px solid var(--brand);
+  border-radius: 8px;
+  box-sizing: border-box;
+  z-index: 5;
+}
+
+.img-resize-handle {
+  pointer-events: auto;
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--brand);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  cursor: nwse-resize;
+}
+
+.md-hint {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 0 4px;
 }
 
 .blank-editor {

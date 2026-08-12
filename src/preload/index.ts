@@ -22,6 +22,12 @@ export interface NoteContent {
   updatedAt: number
 }
 
+export interface SavedImage {
+  relativePath: string
+  dataUrl: string
+  fileName: string
+}
+
 const api = {
   getConfig: (): Promise<AppConfig> => ipcRenderer.invoke('config:get'),
   saveConfig: (config: AppConfig): Promise<AppConfig> =>
@@ -67,6 +73,20 @@ const api = {
   }): Promise<NoteMeta> => ipcRenderer.invoke('notes:rename', payload),
   openPath: (targetPath: string): Promise<string> =>
     ipcRenderer.invoke('shell:openPath', targetPath),
+  saveImage: (payload: {
+    rootPath: string
+    subjectId: string
+    kind: NoteKind
+    bytes: Uint8Array
+    mimeType?: string
+  }): Promise<SavedImage> => ipcRenderer.invoke('notes:saveImage', payload),
+  readImageDataUrl: (payload: {
+    rootPath: string
+    subjectId: string
+    kind: NoteKind
+    relativePath: string
+  }): Promise<string | null> =>
+    ipcRenderer.invoke('notes:readImageDataUrl', payload),
 }
 
 contextBridge.exposeInMainWorld('api', api)

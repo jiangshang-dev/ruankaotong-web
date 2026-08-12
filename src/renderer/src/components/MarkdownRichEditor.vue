@@ -1,10 +1,23 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from 'vue'
-import { htmlToMarkdown, markdownToHtml, plainTextFromHtml } from '../utils/markdown'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  buildImageHtml,
+  collectAssetPaths,
+  htmlToMarkdown,
+  markdownToHtmlWithImages,
+  plainTextFromHtml,
+} from '../utils/markdown'
+
+export type MediaContext = {
+  rootPath: string
+  subjectId: string
+  kind: 'notes' | 'essays'
+}
 
 const props = defineProps<{
   modelValue: string
   placeholder?: string
+  media?: MediaContext | null
 }>()
 
 const emit = defineEmits<{
@@ -13,8 +26,19 @@ const emit = defineEmits<{
 }>()
 
 const editorRef = ref<HTMLDivElement | null>(null)
+const wrapRef = ref<HTMLDivElement | null>(null)
 const fontSize = ref('16px')
 const syncing = ref(false)
+const pasting = ref(false)
+const selectedImg = ref<HTMLImageElement | null>(null)
+const handlePos = ref({ top: 0, left: 0, width: 0, height: 0 })
+const resizing = ref(false)
+
+const selectedWidth = computed(() => {
+  const img = selectedImg.value
+  if (!img) return 0
+  return Math.round(img.getBoundingClientRect().width)
+})
 
 function emitMarkdown(): void {
   if (!editorRef.value) return
@@ -23,27 +47,83 @@ function emitMarkdown(): void {
   emit('change')
 }
 
-function setHtmlFromMarkdown(md: string): void {
+async function resolveDataUrls(md: string): Promise<Record<string, string>> {
+  const map: Record<string, string> = {}
+  if (!props.media?.rootPath) return map
+  const paths = collectAssetPaths(md)
+  await Promise.all(
+    paths.map(async (rel) => {
+      const dataUrl = await window.api.readImageDataUrl({
+        rootPath: props.media!.rootPath,
+        subjectId: props.media!.subjectId,
+        kind: props.media!.kind,
+        relativePath: rel,
+      })
+      if (dataUrl) map[rel] = dataUrl
+    }),
+  )
+  return map
+}
+
+function clearImageSelection(): void {
+  selectedImg.value?.classList.remove('is-selected')
+  selectedImg.value = null
+}
+
+function updateHandlePos(): void {
+  const img = selectedImg.value
+  const wrap = wrapRef.value
+  if (!img || !wrap) return
+  const ir = img.getBoundingClientRect()
+  const wr = wrap.getBoundingClientRect()
+  handlePos.value = {
+    top: ir.top - wr.top + wrap.scrollTop,
+    left: ir.left - wr.left + wrap.scrollLeft,
+    width: ir.width,
+    height: ir.height,
+  }
+}
+
+function selectImage(img: HTMLImageElement): void {
+  if (selectedImg.value !== img) {
+    clearImageSelection()
+    selectedImg.value = img
+    img.classList.add('is-selected')
+  }
+  updateHandlePos()
+}
+
+async function setHtmlFromMarkdown(md: string): Promise<void> {
   if (!editorRef.value) return
+  clearImageSelection()
   syncing.value = true
-  editorRef.value.innerHTML = markdownToHtml(md)
-  void nextTick(() => {
+  try {
+    const map = await resolveDataUrls(md)
+    editorRef.value.innerHTML = markdownToHtmlWithImages(md, map)
+  } finally {
+    await nextTick()
     syncing.value = false
-  })
+  }
 }
 
 watch(
   () => props.modelValue,
   (md) => {
-    if (!editorRef.value || syncing.value) return
+    if (!editorRef.value || syncing.value || pasting.value || resizing.value) return
     const current = htmlToMarkdown(editorRef.value.innerHTML)
     if (current === md.trim()) return
-    setHtmlFromMarkdown(md)
+    void setHtmlFromMarkdown(md)
   },
 )
 
 onMounted(() => {
-  setHtmlFromMarkdown(props.modelValue)
+  void setHtmlFromMarkdown(props.modelValue)
+  window.addEventListener('resize', updateHandlePos)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateHandlePos)
+  stopResizeListeners()
 })
 
 function focusEditor(): void {
@@ -97,15 +177,168 @@ function applyFontSize(): void {
 }
 
 function onInput(): void {
-  if (syncing.value) return
+  if (syncing.value || resizing.value) return
+  emitMarkdown()
+  if (selectedImg.value) updateHandlePos()
+}
+
+function applyImgWidth(img: HTMLImageElement, width: number): void {
+  const max = editorRef.value?.clientWidth
+    ? editorRef.value.clientWidth - 8
+    : width
+  const w = Math.max(80, Math.min(Math.round(width), max))
+  img.style.width = `${w}px`
+  img.style.height = 'auto'
+  img.style.maxWidth = '100%'
+  img.setAttribute('width', String(w))
+  img.setAttribute('data-width', String(w))
+  updateHandlePos()
+}
+
+function setSelectedPercent(percent: number): void {
+  const img = selectedImg.value
+  if (!img || !editorRef.value) return
+  const max = editorRef.value.clientWidth - 8
+  applyImgWidth(img, (max * percent) / 100)
   emitMarkdown()
 }
 
-function onPaste(e: ClipboardEvent): void {
+function resetSelectedSize(): void {
+  const img = selectedImg.value
+  if (!img) return
+  img.style.width = ''
+  img.style.height = 'auto'
+  img.style.maxWidth = '100%'
+  img.removeAttribute('width')
+  img.removeAttribute('data-width')
+  updateHandlePos()
+  emitMarkdown()
+}
+
+let resizeStartX = 0
+let resizeStartW = 0
+
+function onResizeMove(e: MouseEvent): void {
+  if (!resizing.value || !selectedImg.value) return
+  const delta = e.clientX - resizeStartX
+  applyImgWidth(selectedImg.value, resizeStartW + delta)
+}
+
+function onResizeUp(): void {
+  if (!resizing.value) return
+  resizing.value = false
+  stopResizeListeners()
+  emitMarkdown()
+}
+
+function stopResizeListeners(): void {
+  window.removeEventListener('mousemove', onResizeMove)
+  window.removeEventListener('mouseup', onResizeUp)
+}
+
+function startResize(e: MouseEvent): void {
+  if (!selectedImg.value) return
+  e.preventDefault()
+  e.stopPropagation()
+  resizing.value = true
+  resizeStartX = e.clientX
+  resizeStartW = selectedImg.value.getBoundingClientRect().width
+  window.addEventListener('mousemove', onResizeMove)
+  window.addEventListener('mouseup', onResizeUp)
+}
+
+function onEditorClick(e: MouseEvent): void {
+  const target = e.target
+  if (target instanceof HTMLImageElement) {
+    e.preventDefault()
+    selectImage(target)
+    return
+  }
+  clearImageSelection()
+}
+
+function onEditorScroll(): void {
+  if (selectedImg.value) updateHandlePos()
+}
+
+async function saveAndInsertImage(file: File): Promise<void> {
+  if (!props.media?.rootPath) {
+    window.alert('请先选择本地笔记目录，再粘贴图片')
+    return
+  }
+  pasting.value = true
+  try {
+    const buf = new Uint8Array(await file.arrayBuffer())
+    const saved = await window.api.saveImage({
+      rootPath: props.media.rootPath,
+      subjectId: props.media.subjectId,
+      kind: props.media.kind,
+      bytes: buf,
+      mimeType: file.type || 'image/png',
+    })
+    focusEditor()
+    document.execCommand(
+      'insertHTML',
+      false,
+      buildImageHtml(saved.relativePath, saved.dataUrl, file.name || '截图'),
+    )
+    emitMarkdown()
+    await nextTick()
+    const imgs = editorRef.value?.querySelectorAll('img[data-md-src]')
+    const last = imgs?.[imgs.length - 1]
+    if (last instanceof HTMLImageElement) selectImage(last)
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : '图片保存失败')
+  } finally {
+    pasting.value = false
+  }
+}
+
+function findClipboardImage(e: ClipboardEvent): File | null {
+  const items = e.clipboardData?.items
+  if (!items) return null
+  for (const item of Array.from(items)) {
+    if (item.type.startsWith('image/')) {
+      return item.getAsFile()
+    }
+  }
+  const files = e.clipboardData?.files
+  if (files) {
+    for (const file of Array.from(files)) {
+      if (file.type.startsWith('image/')) return file
+    }
+  }
+  return null
+}
+
+async function onPaste(e: ClipboardEvent): Promise<void> {
+  const image = findClipboardImage(e)
+  if (image) {
+    e.preventDefault()
+    await saveAndInsertImage(image)
+    return
+  }
   e.preventDefault()
   const text = e.clipboardData?.getData('text/plain') || ''
   document.execCommand('insertText', false, text)
   emitMarkdown()
+}
+
+async function onDrop(e: DragEvent): Promise<void> {
+  const files = e.dataTransfer?.files
+  if (!files?.length) return
+  const images = Array.from(files).filter((f) => f.type.startsWith('image/'))
+  if (!images.length) return
+  e.preventDefault()
+  for (const img of images) {
+    await saveAndInsertImage(img)
+  }
+}
+
+function onDragOver(e: DragEvent): void {
+  if (e.dataTransfer?.types.includes('Files')) {
+    e.preventDefault()
+  }
 }
 
 defineExpose({
@@ -153,16 +386,49 @@ defineExpose({
         <button type="button" title="分隔线" @click="run('insertHorizontalRule')">—</button>
         <button type="button" title="清除格式" @click="run('removeFormat')">清除</button>
       </div>
+      <template v-if="selectedImg">
+        <div class="md-sep" />
+        <div class="md-group">
+          <span class="md-hint">图片 {{ selectedWidth }}px</span>
+          <button type="button" title="25% 宽" @click="setSelectedPercent(25)">25%</button>
+          <button type="button" title="50% 宽" @click="setSelectedPercent(50)">50%</button>
+          <button type="button" title="75% 宽" @click="setSelectedPercent(75)">75%</button>
+          <button type="button" title="100% 宽" @click="setSelectedPercent(100)">100%</button>
+          <button type="button" title="恢复原始比例宽度" @click="resetSelectedSize">原大</button>
+        </div>
+      </template>
+      <div v-else class="md-sep" />
+      <div v-if="!selectedImg" class="md-group">
+        <span class="md-hint">截图粘贴 / 点击图片可缩放</span>
+      </div>
     </div>
 
-    <div
-      ref="editorRef"
-      class="md-surface"
-      contenteditable="true"
-      spellcheck="false"
-      :data-placeholder="placeholder || '在此书写知识点、案例、错题整理…'"
-      @input="onInput"
-      @paste="onPaste"
-    />
+    <div ref="wrapRef" class="md-surface-wrap" @scroll="onEditorScroll">
+      <div
+        ref="editorRef"
+        class="md-surface"
+        contenteditable="true"
+        spellcheck="false"
+        :data-placeholder="placeholder || '在此书写知识点、案例、错题整理…可直接粘贴截图'"
+        @input="onInput"
+        @paste="onPaste"
+        @drop="onDrop"
+        @dragover="onDragOver"
+        @click="onEditorClick"
+      />
+
+      <div
+        v-if="selectedImg"
+        class="img-resize-box"
+        :style="{
+          top: `${handlePos.top}px`,
+          left: `${handlePos.left}px`,
+          width: `${handlePos.width}px`,
+          height: `${handlePos.height}px`,
+        }"
+      >
+        <span class="img-resize-handle" title="拖动调整大小" @mousedown="startResize" />
+      </div>
+    </div>
   </div>
 </template>
