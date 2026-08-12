@@ -750,3 +750,129 @@ button {
   padding: 24px;
   text-align: center;
 }
+
+.score-modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 28, 24, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+  padding: 24px;
+}
+
+.score-modal {
+  width: min(720px, 100%);
+  max-height: min(80vh, 820px);
+  overflow: auto;
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  padding: 18px 20px 20px;
+}
+
+.score-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.score-modal-head h3 {
+  margin: 0;
+  font-family: var(--font);
+}
+
+.score-hero {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--brand-soft);
+  margin-bottom: 14px;
+}
+
+.score-num {
+  font-size: 42px;
+  font-weight: 700;
+  color: var(--brand-dark);
+  line-height: 1;
+}
+
+.score-max {
+  font-size: 16px;
+  font-weight: 600;
+  margin-left: 2px;
+  color: var(--muted);
+}
+
+.score-level {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.score-level.ok {
+  color: var(--ok);
+}
+
+.score-level.fail {
+  color: var(--danger);
+}
+
+.score-pass-hint {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.score-hero p,
+.score-dim p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+.score-dims {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.score-dim {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.score-dim-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.score-lists {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.score-lists ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.7;
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .score-lists {
+    grid-template-columns: 1fr;
+  }
+}

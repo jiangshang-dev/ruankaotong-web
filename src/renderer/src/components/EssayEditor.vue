@@ -2,6 +2,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '../stores/app'
 import {
+  polishEssay,
+  scoreEssay,
+  type EssayScoreResponse,
+  type PolishPart,
+} from '../api/essayAi'
+import {
   buildEssayMarkdown,
   countExamWords,
   joinTopic,
@@ -26,6 +32,9 @@ const body = ref('')
 const currentName = ref('')
 const dirty = ref(false)
 const status = ref('')
+const aiLoading = ref('')
+const scoreOpen = ref(false)
+const scoreResult = ref<EssayScoreResponse | null>(null)
 
 /** 摘要 300 字以内；正文约 2000~2500 */
 const ABSTRACT_MAX = 300
@@ -147,6 +156,80 @@ async function remove(): Promise<void> {
   emit('deleted')
 }
 
+function buildAiPayload(part: PolishPart) {
+  return {
+    subject: store.subject.name,
+    topic: topic.value.trim(),
+    part,
+    abstractText: abstractText.value,
+    bodyText: body.value,
+  }
+}
+
+async function runPolish(part: PolishPart): Promise<void> {
+  if (!topic.value.trim()) {
+    status.value = '请先填写论文题目'
+    return
+  }
+  if (part === 'abstract' && !abstractText.value.trim()) {
+    status.value = '摘要为空，无法润色'
+    return
+  }
+  if (part === 'body' && !body.value.trim()) {
+    status.value = '正文为空，无法润色'
+    return
+  }
+  if (part === 'all' && !abstractText.value.trim() && !body.value.trim()) {
+    status.value = '摘要和正文都为空，无法润色'
+    return
+  }
+  aiLoading.value = part
+  status.value = 'AI 润色中…'
+  try {
+    const res = await polishEssay(buildAiPayload(part))
+    if (part === 'abstract' || part === 'all') {
+      abstractText.value = res.abstractText || abstractText.value
+    }
+    if (part === 'body' || part === 'all') {
+      body.value = res.bodyText || body.value
+    }
+    dirty.value = true
+    status.value = 'AI 润色完成，请检查后保存'
+  } catch (e) {
+    status.value = e instanceof Error ? e.message : '润色失败'
+  } finally {
+    aiLoading.value = ''
+  }
+}
+
+async function runScore(): Promise<void> {
+  if (!topic.value.trim()) {
+    status.value = '请先填写论文题目'
+    return
+  }
+  if (!abstractText.value.trim() && !body.value.trim()) {
+    status.value = '请先写完摘要或正文再评分'
+    return
+  }
+  aiLoading.value = 'score'
+  status.value = 'AI 评分中…'
+  try {
+    const res = await scoreEssay({
+      subject: store.subject.name,
+      topic: topic.value.trim(),
+      abstractText: abstractText.value,
+      bodyText: body.value,
+    })
+    scoreResult.value = res
+    scoreOpen.value = true
+    status.value = `AI 评分完成：${res.totalScore} 分（${res.level || '-'}）`
+  } catch (e) {
+    status.value = e instanceof Error ? e.message : '评分失败'
+  } finally {
+    aiLoading.value = ''
+  }
+}
+
 function onKeydown(e: KeyboardEvent): void {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
     e.preventDefault()
@@ -163,8 +246,38 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     <div class="editor-toolbar" style="padding: 0; border: none">
       <div class="status">{{ status }}{{ dirty ? ' · 未保存' : '' }}</div>
       <div class="actions">
-        <button class="btn" :disabled="store.saving" @click="save">保存</button>
-        <button class="btn danger" @click="remove">删除</button>
+        <button
+          class="btn light"
+          :disabled="!!aiLoading"
+          @click="runPolish('abstract')"
+        >
+          {{ aiLoading === 'abstract' ? '润色中…' : '润色摘要' }}
+        </button>
+        <button
+          class="btn light"
+          :disabled="!!aiLoading"
+          @click="runPolish('body')"
+        >
+          {{ aiLoading === 'body' ? '润色中…' : '润色正文' }}
+        </button>
+        <button
+          class="btn light"
+          :disabled="!!aiLoading"
+          @click="runPolish('all')"
+        >
+          {{ aiLoading === 'all' ? '润色中…' : '润色全部' }}
+        </button>
+        <button
+          class="btn"
+          :disabled="!!aiLoading"
+          @click="runScore"
+        >
+          {{ aiLoading === 'score' ? '评分中…' : 'AI 评分' }}
+        </button>
+        <button class="btn" :disabled="store.saving || !!aiLoading" @click="save">
+          保存
+        </button>
+        <button class="btn danger" :disabled="!!aiLoading" @click="remove">删除</button>
       </div>
     </div>
 
@@ -229,6 +342,55 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       <span class="status">
         统计规则：一个整词算 1 字；词间加空格后计 2；标点算 1 字
       </span>
+    </div>
+
+    <div v-if="scoreOpen && scoreResult" class="score-modal-mask" @click.self="scoreOpen = false">
+      <div class="score-modal">
+        <div class="score-modal-head">
+          <h3>AI 评分解读</h3>
+          <button class="btn light" @click="scoreOpen = false">关闭</button>
+        </div>
+        <div class="score-hero">
+          <div class="score-num">{{ scoreResult.totalScore }}<span class="score-max">/75</span></div>
+          <div>
+            <div
+              class="score-level"
+              :class="scoreResult.totalScore >= 45 ? 'ok' : 'fail'"
+            >
+              {{ scoreResult.level || (scoreResult.totalScore >= 45 ? '合格' : '不及格') }}
+              <span class="score-pass-hint">（≥45 合格）</span>
+            </div>
+            <p>{{ scoreResult.summary }}</p>
+          </div>
+        </div>
+        <div v-if="scoreResult.dimensions?.length" class="score-dims">
+          <div
+            v-for="(d, i) in scoreResult.dimensions"
+            :key="i"
+            class="score-dim"
+          >
+            <div class="score-dim-top">
+              <strong>{{ d.name }}</strong>
+              <span>{{ d.score }} / {{ d.max }}</span>
+            </div>
+            <p>{{ d.comment }}</p>
+          </div>
+        </div>
+        <div class="score-lists">
+          <div>
+            <strong>优点</strong>
+            <ul>
+              <li v-for="(s, i) in scoreResult.strengths || []" :key="'s' + i">{{ s }}</li>
+            </ul>
+          </div>
+          <div>
+            <strong>改进建议</strong>
+            <ul>
+              <li v-for="(s, i) in scoreResult.improvements || []" :key="'i' + i">{{ s }}</li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
