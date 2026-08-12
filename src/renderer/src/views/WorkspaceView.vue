@@ -142,7 +142,8 @@ function onDeleted(): void {
           </p>
           <ul>
             <li>知识点笔记：日常整理考点、案例与错题</li>
-            <li>论文练习：题目名称 + 题目描述，摘要（300 字内）与正文上下排列并实时计字</li>
+            <li>论文练习：题目一个框粘贴；摘要（300 字内）与正文上下排列并实时计字</li>
+            <li>知识点笔记：富文本工具栏编辑，保存为 Markdown</li>
             <li>字数规则：整词算 1 字，空格分隔算两词，标点算 1 字</li>
           </ul>
           <button class="btn" @click="onChooseDir">选择本地文件夹</button>

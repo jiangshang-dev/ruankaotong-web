@@ -1,11 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '../stores/app'
-import {
-  buildNoteMarkdown,
-  countExamWords,
-  parseNoteMarkdown,
-} from '../utils/exam'
+import { buildNoteMarkdown, countExamWords, parseNoteMarkdown } from '../utils/exam'
+import MarkdownRichEditor from './MarkdownRichEditor.vue'
 
 const props = defineProps<{
   fileName: string
@@ -23,6 +20,7 @@ const body = ref('')
 const currentName = ref('')
 const dirty = ref(false)
 const status = ref('')
+const editorKey = ref(0)
 
 const wordCount = computed(() => countExamWords(`${title.value}\n${body.value}`))
 
@@ -33,6 +31,7 @@ async function load(): Promise<void> {
     currentName.value = ''
     dirty.value = false
     status.value = '新建笔记'
+    editorKey.value += 1
     return
   }
   const note = await window.api.readNote(
@@ -47,6 +46,7 @@ async function load(): Promise<void> {
   currentName.value = note.fileName
   dirty.value = false
   status.value = `已打开 ${note.fileName}`
+  editorKey.value += 1
 }
 
 watch(
@@ -138,11 +138,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     </div>
 
     <div class="field body">
-      <label>正文（Markdown）</label>
-      <textarea
+      <label>正文</label>
+      <MarkdownRichEditor
+        :key="editorKey"
         v-model="body"
-        placeholder="在此书写知识点、案例、错题整理…"
-        @input="markDirty"
+        @change="markDirty"
       />
     </div>
 
@@ -150,7 +150,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       <span class="word-chip">
         字数 <b>{{ wordCount }}</b>
       </span>
-      <span class="status">中文按字、英文整词、标点各计 1</span>
+      <span class="status">中文按字、英文整词、标点各计 1；保存为 Markdown</span>
     </div>
   </div>
 </template>

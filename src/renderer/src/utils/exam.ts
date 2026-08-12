@@ -52,8 +52,9 @@ export function joinTopic(title: string, prompt: string): string {
 const FRONT_MATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
 
 export function buildEssayMarkdown(parts: EssayParts): string {
-  const title = parts.title.trim() || '未命名论文'
-  const topicBlock = joinTopic(title, parts.prompt)
+  const fromTopic = splitTopic(parts.prompt)
+  const title = parts.title.trim() || fromTopic.title || '未命名论文'
+  const topicBlock = parts.prompt.trim() || title
   return `---
 title: "${title.replace(/"/g, '\\"')}"
 type: essay

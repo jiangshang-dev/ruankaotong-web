@@ -567,6 +567,130 @@ button {
   min-height: 280px;
 }
 
+.md-editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.md-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  background: #f4f8f6;
+}
+
+.md-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.md-sep {
+  width: 1px;
+  height: 22px;
+  background: #d0ddd6;
+  margin: 0 2px;
+}
+
+.md-toolbar button,
+.md-toolbar select {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  line-height: 1;
+  min-height: 28px;
+}
+
+.md-toolbar select {
+  border-color: var(--line);
+  background: #fff;
+}
+
+.md-toolbar button:hover {
+  background: #fff;
+  border-color: var(--line);
+}
+
+.md-surface {
+  flex: 1;
+  min-height: 280px;
+  overflow: auto;
+  padding: 16px 18px;
+  outline: none;
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.75;
+  color: var(--ink);
+}
+
+.md-surface:empty::before,
+.md-surface[data-placeholder]:has(> br:only-child)::before,
+.md-surface[data-placeholder]:has(> p:only-child > br:only-child)::before {
+  content: attr(data-placeholder);
+  color: #9aa89f;
+  pointer-events: none;
+}
+
+.md-surface h1,
+.md-surface h2,
+.md-surface h3 {
+  margin: 0.8em 0 0.4em;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.md-surface h1 {
+  font-size: 1.7em;
+}
+
+.md-surface h2 {
+  font-size: 1.4em;
+}
+
+.md-surface h3 {
+  font-size: 1.2em;
+}
+
+.md-surface p {
+  margin: 0.45em 0;
+}
+
+.md-surface ul,
+.md-surface ol {
+  margin: 0.45em 0;
+  padding-left: 1.4em;
+}
+
+.md-surface blockquote {
+  margin: 0.6em 0;
+  padding: 0.2em 0.9em;
+  border-left: 3px solid #7ec8bc;
+  color: var(--muted);
+  background: #f4faf8;
+}
+
+.md-surface hr {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 1em 0;
+}
+
+.md-surface u {
+  text-decoration: underline;
+}
+
 .blank-editor {
   height: 100%;
   display: grid;

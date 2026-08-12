@@ -4,7 +4,9 @@ import { useAppStore } from '../stores/app'
 import {
   buildEssayMarkdown,
   countExamWords,
+  joinTopic,
   parseEssayMarkdown,
+  splitTopic,
 } from '../utils/exam'
 
 const props = defineProps<{
@@ -18,8 +20,7 @@ const emit = defineEmits<{
 }>()
 
 const store = useAppStore()
-const title = ref('')
-const prompt = ref('')
+const topic = ref('')
 const abstractText = ref('')
 const body = ref('')
 const currentName = ref('')
@@ -31,11 +32,10 @@ const ABSTRACT_MAX = 300
 const BODY_MIN = 2000
 const BODY_MAX = 2500
 
+const topicTitle = computed(() => splitTopic(topic.value).title)
 const abstractCount = computed(() => countExamWords(abstractText.value))
 const bodyCount = computed(() => countExamWords(body.value))
-const totalCount = computed(
-  () => abstractCount.value + bodyCount.value,
-)
+const totalCount = computed(() => abstractCount.value + bodyCount.value)
 
 const abstractClass = computed(() => {
   const n = abstractCount.value
@@ -55,8 +55,7 @@ const bodyClass = computed(() => {
 
 async function load(): Promise<void> {
   if (props.isNew || !props.fileName) {
-    title.value = ''
-    prompt.value = ''
+    topic.value = ''
     abstractText.value = ''
     body.value = ''
     currentName.value = ''
@@ -71,8 +70,7 @@ async function load(): Promise<void> {
     props.fileName,
   )
   const parsed = parseEssayMarkdown(note.content)
-  title.value = parsed.title
-  prompt.value = parsed.prompt
+  topic.value = joinTopic(parsed.title, parsed.prompt)
   abstractText.value = parsed.abstract
   body.value = parsed.body
   currentName.value = note.fileName
@@ -93,8 +91,9 @@ function markDirty(): void {
 }
 
 async function save(): Promise<void> {
-  if (!title.value.trim()) {
-    status.value = '请先填写题目名称'
+  const { title } = splitTopic(topic.value)
+  if (!title) {
+    status.value = '请先填写论文题目（首行作为题目名称）'
     return
   }
   if (abstractCount.value > ABSTRACT_MAX) {
@@ -104,8 +103,8 @@ async function save(): Promise<void> {
   store.saving = true
   try {
     const content = buildEssayMarkdown({
-      title: title.value,
-      prompt: prompt.value,
+      title,
+      prompt: topic.value.trim(),
       abstract: abstractText.value,
       body: body.value,
     })
@@ -115,7 +114,7 @@ async function save(): Promise<void> {
       kind: 'essays',
       fileName: currentName.value,
       content,
-      title: title.value.trim(),
+      title,
     })
     currentName.value = meta.fileName
     dirty.value = false
@@ -136,7 +135,8 @@ async function remove(): Promise<void> {
     emit('deleted')
     return
   }
-  if (!confirm(`确认删除论文「${title.value || currentName.value}」？`)) return
+  const name = topicTitle.value || currentName.value
+  if (!confirm(`确认删除论文「${name}」？`)) return
   await window.api.deleteNote(
     store.rootPath,
     store.subjectId,
@@ -170,21 +170,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
     <div class="essay-stack">
       <div class="essay-panel essay-panel--topic">
-        <strong>论文题目</strong>
-        <div class="field">
-          <label>题目名称</label>
-          <input
-            v-model="title"
-            placeholder="例如：论大模型智能运维技术及应用"
-            @input="markDirty"
-          />
+        <div class="panel-head">
+          <strong>论文题目</strong>
+          <span class="status">首行作题目名称，下方粘贴题目描述与要求</span>
         </div>
         <div class="field">
-          <label>题目描述</label>
           <textarea
-            v-model="prompt"
+            v-model="topic"
             class="prompt-area"
-            placeholder="粘贴考试题目背景、写作要求等大段文字…"
+            placeholder="论大模型智能运维技术及应用&#10;&#10;近年来，大模型技术快速发展……&#10;&#10;请以「论大模型智能运维技术及应用」为题，依次论述以下三个方面：&#10;1. 简要叙述你参与的软件开发项目……"
             @input="markDirty"
           />
         </div>
