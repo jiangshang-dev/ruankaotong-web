@@ -12,6 +12,7 @@ import {
   countExamWords,
   joinTopic,
   parseEssayMarkdown,
+  sanitizeEssayParts,
   splitTopic,
 } from '../utils/exam'
 
@@ -79,9 +80,10 @@ async function load(): Promise<void> {
     props.fileName,
   )
   const parsed = parseEssayMarkdown(note.content)
-  topic.value = joinTopic(parsed.title, parsed.prompt)
-  abstractText.value = parsed.abstract
-  body.value = parsed.body
+  const cleaned = sanitizeEssayParts(parsed)
+  topic.value = joinTopic(cleaned.title, cleaned.prompt)
+  abstractText.value = cleaned.abstract
+  body.value = cleaned.body
   currentName.value = note.fileName
   dirty.value = false
   status.value = `已打开 ${note.fileName}`
@@ -105,17 +107,31 @@ async function save(): Promise<void> {
     status.value = '请先填写论文题目（首行作为题目名称）'
     return
   }
-  if (abstractCount.value > ABSTRACT_MAX) {
-    status.value = `摘要超出 ${ABSTRACT_MAX} 字上限（当前 ${abstractCount.value}）`
-    return
-  }
   store.saving = true
   try {
-    const content = buildEssayMarkdown({
+    const cleaned = sanitizeEssayParts({
       title,
       prompt: topic.value.trim(),
       abstract: abstractText.value,
       body: body.value,
+    })
+    // 写回界面，去掉误带入的 ## 摘要 / ## 正文 等污染
+    topic.value = joinTopic(cleaned.title, cleaned.prompt)
+    abstractText.value = cleaned.abstract
+    body.value = cleaned.body
+
+    const absCount = countExamWords(cleaned.abstract)
+    if (absCount > ABSTRACT_MAX) {
+      status.value = `摘要超出 ${ABSTRACT_MAX} 字上限（当前 ${absCount}）`
+      store.saving = false
+      return
+    }
+
+    const content = buildEssayMarkdown({
+      title: cleaned.title,
+      prompt: topic.value.trim(),
+      abstract: cleaned.abstract,
+      body: cleaned.body,
     })
     const meta = await window.api.writeNote({
       rootPath: store.rootPath,
@@ -123,7 +139,7 @@ async function save(): Promise<void> {
       kind: 'essays',
       fileName: currentName.value,
       content,
-      title,
+      title: cleaned.title,
     })
     currentName.value = meta.fileName
     dirty.value = false
@@ -187,12 +203,21 @@ async function runPolish(part: PolishPart): Promise<void> {
   status.value = 'AI 润色中…'
   try {
     const res = await polishEssay(buildAiPayload(part))
-    if (part === 'abstract' || part === 'all') {
-      abstractText.value = res.abstractText || abstractText.value
-    }
-    if (part === 'body' || part === 'all') {
-      body.value = res.bodyText || body.value
-    }
+    const cleaned = sanitizeEssayParts({
+      title: splitTopic(topic.value).title || '未命名论文',
+      prompt: topic.value.trim(),
+      abstract:
+        part === 'abstract' || part === 'all'
+          ? res.abstractText || abstractText.value
+          : abstractText.value,
+      body:
+        part === 'body' || part === 'all'
+          ? res.bodyText || body.value
+          : body.value,
+    })
+    topic.value = joinTopic(cleaned.title, cleaned.prompt)
+    abstractText.value = cleaned.abstract
+    body.value = cleaned.body
     dirty.value = true
     status.value = 'AI 润色完成，请检查后保存'
   } catch (e) {

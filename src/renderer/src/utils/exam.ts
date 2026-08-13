@@ -51,10 +51,128 @@ export function joinTopic(title: string, prompt: string): string {
 
 const FRONT_MATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** 匹配论文结构标题行：## 题目描述 / ## 摘要 / ## 正文 */
+const ESSAY_SECTION_LINE_RE = /^##\s*(题目描述|摘要|正文)\s*$/gm
+
+function findSectionRanges(text: string): {
+  topic?: { start: number; end: number }
+  abstract?: { start: number; end: number }
+  body?: { start: number; end: number }
+} {
+  const normalized = text.replace(/\r\n/g, '\n')
+  const headers: {
+    name: 'topic' | 'abstract' | 'body'
+    lineStart: number
+    contentStart: number
+  }[] = []
+  ESSAY_SECTION_LINE_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = ESSAY_SECTION_LINE_RE.exec(normalized))) {
+    const label = m[1]
+    const name =
+      label === '题目描述' ? 'topic' : label === '摘要' ? 'abstract' : 'body'
+    headers.push({
+      name,
+      lineStart: m.index,
+      contentStart: m.index + m[0].length,
+    })
+  }
+  const ranges: {
+    topic?: { start: number; end: number }
+    abstract?: { start: number; end: number }
+    body?: { start: number; end: number }
+  } = {}
+  for (let i = 0; i < headers.length; i++) {
+    const cur = headers[i]
+    const end =
+      i + 1 < headers.length ? headers[i + 1].lineStart : normalized.length
+    ranges[cur.name] = { start: cur.contentStart, end }
+  }
+  return ranges
+}
+
+function sliceSection(
+  text: string,
+  range?: { start: number; end: number },
+): string {
+  if (!range) return ''
+  return text.slice(range.start, range.end).replace(/^\n+/, '').trim()
+}
+
+/**
+ * 清理某一框里误带入的后续章节标题及之后内容。
+ * 例如摘要框里出现「## 正文」或「### 正文」时，截断到该行之前。
+ */
+export function stripTrailingEssaySections(
+  text: string,
+  kind: 'topic' | 'abstract' | 'body',
+): string {
+  let t = text.replace(/\r\n/g, '\n').trim()
+  if (!t) return ''
+
+  // 去掉开头误带的本章节标题
+  if (kind === 'topic') {
+    t = t.replace(/^##\s*题目描述\s*\n+/u, '')
+  } else if (kind === 'abstract') {
+    t = t.replace(/^##\s*摘要\s*\n+/u, '')
+  } else {
+    t = t.replace(/^##\s*正文\s*\n+/u, '')
+  }
+
+  // 截断到后续结构标题（兼容 ## / ###）
+  let cutAt = -1
+  const lines = t.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    const isTopic = /^#{1,6}\s*题目描述\s*$/u.test(line)
+    const isAbs = /^#{1,6}\s*摘要\s*$/u.test(line)
+    const isBody = /^#{1,6}\s*正文\s*$/u.test(line)
+    if (kind === 'topic' && (isAbs || isBody)) {
+      cutAt = i
+      break
+    }
+    if (kind === 'abstract' && (isBody || isTopic)) {
+      cutAt = i
+      break
+    }
+    // 正文里若又出现摘要/题目描述结构标题，也截断，避免回写污染
+    if (kind === 'body' && (isAbs || isTopic)) {
+      cutAt = i
+      break
+    }
+  }
+  if (cutAt >= 0) {
+    t = lines.slice(0, cutAt).join('\n').trim()
+  }
+  return t
+}
+
+export function sanitizeEssayParts(parts: EssayParts): EssayParts {
+  const title = parts.title.trim() || '未命名论文'
+  let prompt = stripTrailingEssaySections(parts.prompt, 'topic')
+  // 题目描述里不要再叠一层同名一级标题
+  prompt = prompt.replace(new RegExp(`^#\\s*${escapeRegExp(title)}\\s*\\n+`, 'u'), '')
+  // 若 prompt 整段就是「标题 + 描述」，保留；若误存了完整 markdown，上面已截断
+  const abstract = stripTrailingEssaySections(parts.abstract, 'abstract')
+  const body = stripTrailingEssaySections(parts.body, 'body')
+  return { title, prompt: prompt.trim(), abstract, body }
+}
+
 export function buildEssayMarkdown(parts: EssayParts): string {
-  const fromTopic = splitTopic(parts.prompt)
-  const title = parts.title.trim() || fromTopic.title || '未命名论文'
-  const topicBlock = parts.prompt.trim() || title
+  const cleaned = sanitizeEssayParts({
+    ...parts,
+    // prompt 字段可能是整段题目框（含首行标题）
+    prompt: parts.prompt,
+    title: parts.title,
+  })
+  const fromTopic = splitTopic(cleaned.prompt)
+  const title = cleaned.title || fromTopic.title || '未命名论文'
+  // 题目描述区：保存完整题目框内容（首行标题+描述），但已去掉摘要/正文污染
+  const topicBlock = cleaned.prompt.trim() || title
   return `---
 title: "${title.replace(/"/g, '\\"')}"
 type: essay
@@ -69,48 +187,57 @@ ${topicBlock}
 
 ## 摘要
 
-${parts.abstract.trim()}
+${cleaned.abstract}
 
 ## 正文
 
-${parts.body.trim()}
+${cleaned.body}
 `
 }
 
 export function parseEssayMarkdown(content: string): EssayParts {
-  let rest = content
+  let rest = content.replace(/\r\n/g, '\n')
   let title = ''
 
-  const fm = content.match(FRONT_MATTER_RE)
+  const fm = rest.match(FRONT_MATTER_RE)
   if (fm) {
     const titleLine = fm[1].match(/^title:\s*(.+)$/m)
     if (titleLine) {
       title = titleLine[1].trim().replace(/^["']|["']$/g, '')
     }
-    rest = content.slice(fm[0].length)
+    rest = rest.slice(fm[0].length)
   }
 
-  const h1 = rest.match(/^#\s+(.+)$/m)
+  const h1 = rest.match(/^#\s+(.+)\s*$/m)
   if (h1 && !title) title = h1[1].trim()
 
-  const promptMatch = rest.match(
-    /##\s*题目描述\s*\r?\n([\s\S]*?)(?=\r?\n##\s*摘要\b|$)/,
-  )
-  const abstractMatch = rest.match(
-    /##\s*摘要\s*\r?\n([\s\S]*?)(?=\r?\n##\s*正文\b|$)/,
-  )
-  const bodyMatch = rest.match(/##\s*正文\s*\r?\n([\s\S]*)$/)
+  const ranges = findSectionRanges(rest)
+  let promptRaw = sliceSection(rest, ranges.topic)
+  let abstractRaw = sliceSection(rest, ranges.abstract)
+  let bodyRaw = sliceSection(rest, ranges.body)
 
-  const promptRaw = promptMatch ? promptMatch[1].trim() : ''
-  const split = splitTopic(promptRaw)
-  if (!title && split.title) title = split.title
-
-  return {
-    title: title || split.title || '未命名论文',
-    prompt: promptRaw,
-    abstract: abstractMatch ? abstractMatch[1].trim() : '',
-    body: bodyMatch ? bodyMatch[1].trim() : '',
+  // 兼容旧文件：没有「题目描述」分区时，尝试用摘要前内容
+  if (!promptRaw && !ranges.topic) {
+    const absIdx = rest.search(/^##\s*摘要\s*$/m)
+    if (absIdx > 0) {
+      promptRaw = rest
+        .slice(0, absIdx)
+        .replace(/^#\s+.+?\n+/, '')
+        .trim()
+    }
   }
+
+  const cleaned = sanitizeEssayParts({
+    title: title || '未命名论文',
+    prompt: promptRaw,
+    abstract: abstractRaw,
+    body: bodyRaw,
+  })
+  const split = splitTopic(cleaned.prompt)
+  if (!title && split.title) cleaned.title = split.title
+  else if (title) cleaned.title = title
+
+  return cleaned
 }
 
 export function buildNoteMarkdown(title: string, body: string): string {
@@ -144,10 +271,6 @@ export function stripLeadingTitleHeading(body: string, title: string): string {
     text = text.replace(single, '').replace(/^\s+/, '')
   }
   return text.trim()
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 export function parseNoteMarkdown(content: string): { title: string; body: string } {
