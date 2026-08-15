@@ -8,6 +8,9 @@ import { formatDate } from '../utils/exam'
 
 const store = useAppStore()
 const createFlag = ref(false)
+const dragFrom = ref('')
+const dragOver = ref('')
+const didDrag = ref(false)
 
 const kindLabel = computed(() =>
   store.kind === 'notes' ? '知识点笔记' : '论文练习',
@@ -40,6 +43,10 @@ async function openFolder(): Promise<void> {
 }
 
 function openItem(fileName: string): void {
+  if (didDrag.value) {
+    didDrag.value = false
+    return
+  }
   createFlag.value = false
   store.selectFile(fileName)
 }
@@ -62,32 +69,71 @@ function onDeleted(): void {
   createFlag.value = false
   store.selectFile('')
 }
+
+function onDragStart(e: DragEvent, fileName: string): void {
+  dragFrom.value = fileName
+  didDrag.value = false
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', fileName)
+  }
+}
+
+function onDragOver(e: DragEvent, fileName: string): void {
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  if (!dragFrom.value || dragFrom.value === fileName) return
+  if (dragOver.value === fileName) return
+  dragOver.value = fileName
+  const fromIndex = store.notes.findIndex((n) => n.fileName === dragFrom.value)
+  const toIndex = store.notes.findIndex((n) => n.fileName === fileName)
+  if (fromIndex < 0 || toIndex < 0) return
+  store.moveNote(fromIndex, toIndex)
+  didDrag.value = true
+}
+
+async function onDrop(e: DragEvent): Promise<void> {
+  e.preventDefault()
+  dragOver.value = ''
+  if (!dragFrom.value) return
+  await store.persistNotesOrder()
+}
+
+async function onDragEnd(): Promise<void> {
+  if (dragFrom.value && didDrag.value) {
+    await store.persistNotesOrder()
+  }
+  dragFrom.value = ''
+  dragOver.value = ''
+}
 </script>
 
 <template>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand">
-        <h1>软考通</h1>
-        <p>本地 Markdown 备考笔记</p>
-      </div>
-
-      <div class="workspace-box">
-        <div class="workspace-path">
-          {{ store.rootPath || '尚未选择本地文件夹' }}
+      <div class="sidebar-top">
+        <div class="brand">
+          <h1>软考通</h1>
+          <p>本地 Markdown 备考笔记</p>
         </div>
-        <div style="display: flex; gap: 8px; margin-top: 10px">
-          <button class="btn" style="flex: 1" @click="onChooseDir">
-            {{ store.rootPath ? '更换目录' : '选择目录' }}
-          </button>
-          <button
-            v-if="store.rootPath"
-            class="btn ghost"
-            title="在访达中打开"
-            @click="openFolder"
-          >
-            打开
-          </button>
+
+        <div class="workspace-box">
+          <div class="workspace-path">
+            {{ store.rootPath || '尚未选择本地文件夹' }}
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 10px">
+            <button class="btn" style="flex: 1" @click="onChooseDir">
+              {{ store.rootPath ? '更换目录' : '选择目录' }}
+            </button>
+            <button
+              v-if="store.rootPath"
+              class="btn ghost"
+              title="在访达中打开"
+              @click="openFolder"
+            >
+              打开
+            </button>
+          </div>
         </div>
       </div>
 
@@ -168,8 +214,18 @@ function onDeleted(): void {
               v-for="item in store.notes"
               :key="item.fileName"
               class="note-item"
-              :class="{ active: store.currentFile === item.fileName }"
+              :class="{
+                active: store.currentFile === item.fileName,
+                dragging: dragFrom === item.fileName,
+                'drag-over': dragOver === item.fileName && dragFrom !== item.fileName,
+              }"
+              draggable="true"
+              title="拖动可排序"
               @click="openItem(item.fileName)"
+              @dragstart="onDragStart($event, item.fileName)"
+              @dragover="onDragOver($event, item.fileName)"
+              @drop="onDrop"
+              @dragend="onDragEnd"
             >
               <strong>{{ item.title }}</strong>
               <span>{{ formatDate(item.updatedAt) }}</span>

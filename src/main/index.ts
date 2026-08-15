@@ -7,6 +7,7 @@ import {
   writeNote,
   deleteNote,
   renameNote,
+  saveNotesOrder,
   getAppConfig,
   saveAppConfig,
   saveNoteImage,
@@ -94,6 +95,21 @@ app.whenReady().then(() => {
       kind: 'notes' | 'essays',
     ): Promise<NoteMeta[]> => {
       return listNotes(rootPath, subjectId, kind)
+    },
+  )
+
+  ipcMain.handle(
+    'notes:saveOrder',
+    async (
+      _e,
+      payload: {
+        rootPath: string
+        subjectId: string
+        kind: 'notes' | 'essays'
+        fileNames: string[]
+      },
+    ): Promise<NoteMeta[]> => {
+      return saveNotesOrder(payload)
     },
   )
 

@@ -132,6 +132,121 @@ function parseTitle(content: string, fileName: string): string {
   return basename(fileName, '.md')
 }
 
+/** 列表自定义排序（拖动排序持久化） */
+const ORDER_FILE = '.order.json'
+
+function orderFilePath(
+  rootPath: string,
+  subjectId: string,
+  kind: 'notes' | 'essays',
+): string {
+  return join(rootPath, subjectId, kind, ORDER_FILE)
+}
+
+function readOrder(
+  rootPath: string,
+  subjectId: string,
+  kind: 'notes' | 'essays',
+): string[] {
+  const file = orderFilePath(rootPath, subjectId, kind)
+  if (!existsSync(file)) return []
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf-8')) as unknown
+    if (!Array.isArray(raw)) return []
+    return raw.filter((x): x is string => typeof x === 'string')
+  } catch {
+    return []
+  }
+}
+
+function writeOrder(
+  rootPath: string,
+  subjectId: string,
+  kind: 'notes' | 'essays',
+  fileNames: string[],
+): void {
+  ensureDir(join(rootPath, subjectId, kind))
+  writeFileSync(
+    orderFilePath(rootPath, subjectId, kind),
+    JSON.stringify(fileNames, null, 2),
+    'utf-8',
+  )
+}
+
+function sortNotesByOrder(items: NoteMeta[], order: string[]): NoteMeta[] {
+  const map = new Map(items.map((item) => [item.fileName, item]))
+  const sorted: NoteMeta[] = []
+  for (const name of order) {
+    const item = map.get(name)
+    if (item) {
+      sorted.push(item)
+      map.delete(name)
+    }
+  }
+  const rest = [...map.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+  return [...sorted, ...rest]
+}
+
+function upsertOrderEntry(
+  rootPath: string,
+  subjectId: string,
+  kind: 'notes' | 'essays',
+  fileName: string,
+  position: 'start' | 'end' = 'start',
+): void {
+  const order = readOrder(rootPath, subjectId, kind).filter((f) => f !== fileName)
+  if (position === 'start') order.unshift(fileName)
+  else order.push(fileName)
+  writeOrder(rootPath, subjectId, kind, order)
+}
+
+function removeOrderEntry(
+  rootPath: string,
+  subjectId: string,
+  kind: 'notes' | 'essays',
+  fileName: string,
+): void {
+  const order = readOrder(rootPath, subjectId, kind).filter((f) => f !== fileName)
+  writeOrder(rootPath, subjectId, kind, order)
+}
+
+function renameOrderEntry(
+  rootPath: string,
+  subjectId: string,
+  kind: 'notes' | 'essays',
+  oldName: string,
+  newName: string,
+): void {
+  const order = readOrder(rootPath, subjectId, kind)
+  const idx = order.indexOf(oldName)
+  if (idx >= 0) {
+    order[idx] = newName
+    writeOrder(rootPath, subjectId, kind, order)
+  } else {
+    upsertOrderEntry(rootPath, subjectId, kind, newName, 'start')
+  }
+}
+
+export function saveNotesOrder(payload: {
+  rootPath: string
+  subjectId: string
+  kind: 'notes' | 'essays'
+  fileNames: string[]
+}): NoteMeta[] {
+  const { rootPath, subjectId, kind, fileNames } = payload
+  const dir = join(rootPath, subjectId, kind)
+  ensureDir(dir)
+  const existing = new Set(
+    readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.md')),
+  )
+  const ordered = fileNames.filter((f) => existing.has(f))
+  for (const f of existing) {
+    if (!ordered.includes(f)) ordered.push(f)
+  }
+  writeOrder(rootPath, subjectId, kind, ordered)
+  return listNotes(rootPath, subjectId, kind)
+}
+
 export function listNotes(
   rootPath: string,
   subjectId: string,
@@ -139,7 +254,7 @@ export function listNotes(
 ): NoteMeta[] {
   const dir = join(rootPath, subjectId, kind)
   ensureDir(dir)
-  return readdirSync(dir)
+  const items = readdirSync(dir)
     .filter((f) => f.toLowerCase().endsWith('.md'))
     .map((fileName) => {
       const full = join(dir, fileName)
@@ -159,7 +274,7 @@ export function listNotes(
         size: st.size,
       }
     })
-    .sort((a, b) => b.updatedAt - a.updatedAt)
+  return sortNotesByOrder(items, readOrder(rootPath, subjectId, kind))
 }
 
 export function readNote(
@@ -202,7 +317,16 @@ export function writeNote(payload: {
   }
   if (!fileName.toLowerCase().endsWith('.md')) fileName += '.md'
   const full = join(rootPath, subjectId, kind, fileName)
+  const created = !existsSync(full)
   writeFileSync(full, content, 'utf-8')
+  if (created) {
+    upsertOrderEntry(rootPath, subjectId, kind, fileName, 'start')
+  } else {
+    const order = readOrder(rootPath, subjectId, kind)
+    if (!order.includes(fileName)) {
+      upsertOrderEntry(rootPath, subjectId, kind, fileName, 'end')
+    }
+  }
   const st = statSync(full)
   return {
     fileName,
@@ -221,6 +345,7 @@ export function deleteNote(
 ): void {
   const full = join(rootPath, subjectId, kind, fileName)
   if (existsSync(full)) unlinkSync(full)
+  removeOrderEntry(rootPath, subjectId, kind, fileName)
 }
 
 export function renameNote(payload: {
@@ -239,6 +364,7 @@ export function renameNote(payload: {
   if (from !== to) {
     if (existsSync(to)) throw new Error('同名文件已存在')
     renameSync(from, to)
+    renameOrderEntry(rootPath, subjectId, kind, oldName, newName)
   }
   const note = readNote(rootPath, subjectId, kind, newName)
   const st = statSync(join(dir, newName))

@@ -26,8 +26,9 @@ html,
 body,
 #app {
   margin: 0;
-  min-height: 100%;
+  width: 100%;
   height: 100%;
+  overflow: hidden;
   background: var(--bg);
   color: var(--ink);
   font-family: var(--ui);
@@ -55,9 +56,12 @@ button {
 
 .app-shell {
   height: 100%;
+  max-height: 100%;
   display: grid;
   grid-template-columns: 248px 1fr;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar {
@@ -66,8 +70,15 @@ button {
   padding: 18px 14px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   border-right: 1px solid rgba(255, 255, 255, 0.06);
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.sidebar-top {
+  flex: 0 0 auto;
 }
 
 .brand {
@@ -144,19 +155,22 @@ button {
 }
 
 .section-label {
-  margin: 4px 8px;
+  margin: 8px 8px 4px;
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(232, 245, 241, 0.55);
+  flex: 0 0 auto;
 }
 
 .subject-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  overflow: auto;
-  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
   padding-right: 2px;
 }
 
@@ -171,6 +185,7 @@ button {
   color: inherit;
   border-radius: 10px;
   padding: 9px 10px;
+  flex: 0 0 auto;
 }
 
 .subject-item:hover {
@@ -208,9 +223,11 @@ button {
 
 .main {
   min-width: 0;
+  min-height: 0;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
+  overflow: hidden;
 }
 
 .topbar {
@@ -222,6 +239,7 @@ button {
   background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
 }
 
 .topbar-left {
@@ -271,8 +289,10 @@ button {
 
 .content {
   min-height: 0;
+  height: 100%;
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 280px minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .note-list {
@@ -281,6 +301,8 @@ button {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .note-list-head {
@@ -290,10 +312,14 @@ button {
   gap: 8px;
   padding: 12px;
   border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
 }
 
 .note-items {
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -307,6 +333,13 @@ button {
   border-radius: 12px;
   padding: 10px 12px;
   color: inherit;
+  flex: 0 0 auto;
+  cursor: grab;
+  user-select: none;
+}
+
+.note-item:active {
+  cursor: grabbing;
 }
 
 .note-item:hover {
@@ -318,6 +351,15 @@ button {
   background: #fff;
   border-color: #9fd5cc;
   box-shadow: var(--shadow);
+}
+
+.note-item.dragging {
+  opacity: 0.45;
+}
+
+.note-item.drag-over {
+  border-color: #2f9e8f;
+  background: #eef8f5;
 }
 
 .note-item strong {
@@ -342,8 +384,10 @@ button {
 .editor-pane {
   min-width: 0;
   min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background:
     radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 28%),
     linear-gradient(180deg, #f8fbf9 0%, #eef3f0 100%);
@@ -440,6 +484,8 @@ button {
 
 .welcome {
   height: 100%;
+  min-height: 0;
+  overflow: auto;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -480,11 +526,13 @@ button {
   padding: 16px 18px 12px;
   min-height: 0;
   height: 100%;
+  overflow: hidden;
 }
 
 .essay-stack {
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -555,6 +603,7 @@ button {
   padding: 16px 18px 12px;
   min-height: 0;
   height: 100%;
+  overflow: hidden;
 }
 
 .note-layout .field.body {
@@ -632,6 +681,7 @@ button {
 }
 
 .md-surface {
+  position: relative;
   min-height: 280px;
   padding: 16px 18px;
   outline: none;
@@ -645,8 +695,13 @@ button {
 .md-surface[data-placeholder]:has(> br:only-child)::before,
 .md-surface[data-placeholder]:has(> p:only-child > br:only-child)::before {
   content: attr(data-placeholder);
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  right: 18px;
   color: #9aa89f;
   pointer-events: none;
+  line-height: 1.75;
 }
 
 .md-surface h1,
@@ -671,6 +726,14 @@ button {
 
 .md-surface p {
   margin: 0.45em 0;
+}
+
+.md-surface > p:first-child {
+  margin-top: 0;
+}
+
+.md-surface > p:last-child {
+  margin-bottom: 0;
 }
 
 .md-surface ul,

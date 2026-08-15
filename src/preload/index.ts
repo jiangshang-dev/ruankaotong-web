@@ -42,6 +42,12 @@ const api = {
     kind: NoteKind,
   ): Promise<NoteMeta[]> =>
     ipcRenderer.invoke('notes:list', rootPath, subjectId, kind),
+  saveNotesOrder: (payload: {
+    rootPath: string
+    subjectId: string
+    kind: NoteKind
+    fileNames: string[]
+  }): Promise<NoteMeta[]> => ipcRenderer.invoke('notes:saveOrder', payload),
   readNote: (
     rootPath: string,
     subjectId: string,

@@ -94,7 +94,8 @@ export function collectAssetPaths(md: string): string[] {
 }
 
 export function markdownToHtml(md: string): string {
-  if (!md.trim()) return '<p><br></p>'
+  // 空正文用单个 <br>，不要用 <p><br></p>（Chrome 会把光标落到第二行）
+  if (!md.trim()) return '<br>'
   return marked.parse(md, { async: false }) as string
 }
 

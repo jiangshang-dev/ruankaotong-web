@@ -83,6 +83,33 @@ export const useAppStore = defineStore('app', () => {
     )
   }
 
+  /** 拖动排序时本地即时重排 */
+  function moveNote(fromIndex: number, toIndex: number): void {
+    if (
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= notes.value.length ||
+      toIndex >= notes.value.length
+    ) {
+      return
+    }
+    const list = [...notes.value]
+    const [item] = list.splice(fromIndex, 1)
+    list.splice(toIndex, 0, item)
+    notes.value = list
+  }
+
+  async function persistNotesOrder(): Promise<void> {
+    if (!rootPath.value) return
+    notes.value = await window.api.saveNotesOrder({
+      rootPath: rootPath.value,
+      subjectId: subjectId.value,
+      kind: kind.value,
+      fileNames: notes.value.map((n) => n.fileName),
+    })
+  }
+
   function selectFile(fileName: string): void {
     currentFile.value = fileName
   }
@@ -104,6 +131,8 @@ export const useAppStore = defineStore('app', () => {
     setSubject,
     setKind,
     refreshList,
+    moveNote,
+    persistNotesOrder,
     selectFile,
   }
 })

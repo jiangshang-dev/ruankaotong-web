@@ -93,16 +93,92 @@ function selectImage(img: HTMLImageElement): void {
   updateHandlePos()
 }
 
+function isEditorVisuallyEmpty(el: HTMLElement): boolean {
+  if (el.querySelector('img, table, hr, pre, video')) return false
+  const text = (el.textContent || '').replace(/\u200b/g, '').trim()
+  if (text) return false
+  // 无可见文字时，仅含空块 / br 也视为空（含多个 <p><br></p>）
+  const html = el.innerHTML
+    .replace(/&nbsp;/gi, '')
+    .replace(/\s+/g, '')
+    .toLowerCase()
+  if (!html || html === '<br>') return true
+  return /^(<(?:p|div)>(?:<br\s*\/?>)?<\/(?:p|div)>|<br\s*\/?>)+$/.test(html)
+}
+
+/** 空编辑器统一成单个 <br>，避免 <p><br></p> 造成「第二行」光标 */
+function normalizeEmptyEditor(el: HTMLElement): void {
+  if (!isEditorVisuallyEmpty(el)) return
+  if (el.innerHTML !== '<br>') {
+    el.innerHTML = '<br>'
+  }
+}
+
+/** 将光标放到正文第一行开头（插在 <br> 之前，而不是之后） */
+function placeCaretAtStart(el: HTMLElement): void {
+  normalizeEmptyEditor(el)
+  el.focus()
+  const sel = window.getSelection()
+  if (!sel) return
+  const range = document.createRange()
+
+  try {
+    const first = el.firstChild
+    if (first?.nodeName === 'BR') {
+      range.setStartBefore(first)
+    } else if (first?.nodeType === Node.ELEMENT_NODE) {
+      const block = first as HTMLElement
+      const br = block.querySelector('br')
+      if (br) range.setStartBefore(br)
+      else if (block.firstChild?.nodeType === Node.TEXT_NODE) {
+        range.setStart(block.firstChild, 0)
+      } else {
+        range.setStart(block, 0)
+      }
+    } else if (first?.nodeType === Node.TEXT_NODE) {
+      range.setStart(first, 0)
+    } else {
+      range.selectNodeContents(el)
+      range.collapse(true)
+    }
+    range.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(range)
+  } catch {
+    range.selectNodeContents(el)
+    range.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(range)
+  }
+}
+
+function focusEditor(atStart = false): void {
+  const el = editorRef.value
+  if (!el) return
+  if (atStart || isEditorVisuallyEmpty(el)) {
+    placeCaretAtStart(el)
+  } else {
+    el.focus()
+  }
+}
+
 async function setHtmlFromMarkdown(md: string): Promise<void> {
   if (!editorRef.value) return
   clearImageSelection()
   syncing.value = true
   try {
     const map = await resolveDataUrls(md)
-    editorRef.value.innerHTML = markdownToHtmlWithImages(md, map)
+    const html = markdownToHtmlWithImages(md, map)
+    editorRef.value.innerHTML = html
+    if (isEditorVisuallyEmpty(editorRef.value)) {
+      normalizeEmptyEditor(editorRef.value)
+    }
   } finally {
     await nextTick()
     syncing.value = false
+    if (editorRef.value && isEditorVisuallyEmpty(editorRef.value)) {
+      placeCaretAtStart(editorRef.value)
+    }
   }
 }
 
@@ -117,7 +193,11 @@ watch(
 )
 
 onMounted(() => {
-  void setHtmlFromMarkdown(props.modelValue)
+  void setHtmlFromMarkdown(props.modelValue).then(() => {
+    if (editorRef.value && isEditorVisuallyEmpty(editorRef.value)) {
+      placeCaretAtStart(editorRef.value)
+    }
+  })
   window.addEventListener('resize', updateHandlePos)
 })
 
@@ -126,8 +206,32 @@ onBeforeUnmount(() => {
   stopResizeListeners()
 })
 
-function focusEditor(): void {
-  editorRef.value?.focus()
+function scheduleCaretAtStart(el: HTMLElement): void {
+  // 双 rAF：覆盖 Chrome focus 后把光标挪到 <br> 后面的默认行为
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => placeCaretAtStart(el))
+  })
+}
+
+function onEditorFocus(): void {
+  const el = editorRef.value
+  if (el && isEditorVisuallyEmpty(el)) {
+    scheduleCaretAtStart(el)
+  }
+}
+
+function onEditorClick(e: MouseEvent): void {
+  const target = e.target
+  if (target instanceof HTMLImageElement) {
+    e.preventDefault()
+    selectImage(target)
+    return
+  }
+  clearImageSelection()
+  const el = editorRef.value
+  if (el && isEditorVisuallyEmpty(el)) {
+    scheduleCaretAtStart(el)
+  }
 }
 
 function run(cmd: string, value?: string): void {
@@ -245,16 +349,6 @@ function startResize(e: MouseEvent): void {
   resizeStartW = selectedImg.value.getBoundingClientRect().width
   window.addEventListener('mousemove', onResizeMove)
   window.addEventListener('mouseup', onResizeUp)
-}
-
-function onEditorClick(e: MouseEvent): void {
-  const target = e.target
-  if (target instanceof HTMLImageElement) {
-    e.preventDefault()
-    selectImage(target)
-    return
-  }
-  clearImageSelection()
 }
 
 function onEditorScroll(): void {
@@ -415,6 +509,7 @@ defineExpose({
         @drop="onDrop"
         @dragover="onDragOver"
         @click="onEditorClick"
+        @focus="onEditorFocus"
       />
 
       <div
