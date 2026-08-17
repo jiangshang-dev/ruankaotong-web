@@ -1164,6 +1164,15 @@ button {
   min-height: 260px;
 }
 
+.essay-panel--question {
+  flex: 0 0 auto;
+}
+
+.case-topic-editor .md-editor {
+  min-height: 180px;
+  height: 240px;
+}
+
 .essay-panel--answer textarea {
   min-height: 220px;
   height: 280px;
