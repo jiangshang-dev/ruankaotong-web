@@ -55,6 +55,7 @@ const selectedGuideId = ref('')
 const draftHistoryKey = ref('')
 const guideStreamEl = ref<HTMLElement | null>(null)
 const guideCollapsed = ref(false)
+const historyCollapsed = ref(false)
 const generatingGuide = ref(false)
 let guideAbort: AbortController | null = null
 const editorKey = ref(0)
@@ -303,6 +304,10 @@ function toggleGuide(): void {
   guideCollapsed.value = !guideCollapsed.value
 }
 
+function toggleHistory(): void {
+  historyCollapsed.value = !historyCollapsed.value
+}
+
 async function runGuide(): Promise<void> {
   abortGuideStream()
   guideCollapsed.value = false
@@ -469,7 +474,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="essay-layout" :class="{ 'guide-collapsed': guideCollapsed }">
+  <div
+    class="essay-layout"
+    :class="{
+      'guide-collapsed': guideCollapsed,
+      'history-collapsed': historyCollapsed,
+    }"
+  >
     <div class="editor-toolbar" style="padding: 0; border: none">
       <div class="status">{{ status }}{{ dirty ? ' · 未保存' : '' }}</div>
       <div class="actions">
@@ -620,21 +631,42 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="guide-board-body">
-        <div class="guide-history">
-          <div class="guide-history-label">历史记录</div>
+        <div class="guide-history" :class="{ collapsed: historyCollapsed }">
+          <div class="guide-history-head">
+            <div class="guide-history-label">历史记录</div>
+            <button
+              class="pane-toggle"
+              type="button"
+              title="收起历史记录"
+              @click="toggleHistory"
+            >
+              ‹
+            </button>
+          </div>
           <button
-            v-for="rec in guideHistory"
-            :key="rec.id"
-            class="guide-history-item"
-            :class="{ active: rec.id === selectedGuideId }"
-            :disabled="aiLoading === 'guide'"
-            @click="selectGuide(rec)"
+            v-if="historyCollapsed"
+            class="pane-rail pane-rail--left"
+            type="button"
+            title="展开历史记录"
+            @click="toggleHistory"
           >
-            <span class="guide-history-topic">{{ rec.topic || recognizedTopic || '论文指导' }}</span>
-            <span class="guide-history-time">{{ formatDate(rec.createdAt) }}</span>
+            <span>历史记录</span>
           </button>
-          <div v-if="!guideHistory.length" class="guide-history-empty">
-            生成后会记入会话历史，下次打开还能看
+          <div class="guide-history-list">
+            <button
+              v-for="rec in guideHistory"
+              :key="rec.id"
+              class="guide-history-item"
+              :class="{ active: rec.id === selectedGuideId }"
+              :disabled="aiLoading === 'guide'"
+              @click="selectGuide(rec)"
+            >
+              <span class="guide-history-topic">{{ rec.topic || recognizedTopic || '论文指导' }}</span>
+              <span class="guide-history-time">{{ formatDate(rec.createdAt) }}</span>
+            </button>
+            <div v-if="!guideHistory.length" class="guide-history-empty">
+              生成后会记入会话历史，下次打开还能看
+            </div>
           </div>
         </div>
         <div ref="guideStreamEl" class="guide-stream">
