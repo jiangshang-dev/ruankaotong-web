@@ -11,7 +11,7 @@ import {
 export type MediaContext = {
   rootPath: string
   subjectId: string
-  kind: 'notes' | 'essays'
+  kind: 'notes' | 'essays' | 'cases'
 }
 
 const props = defineProps<{

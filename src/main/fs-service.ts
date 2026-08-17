@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync, renameSync, statSync } from 'fs'
 import { join, basename } from 'path'
 
+export type NoteKind = 'notes' | 'essays' | 'cases'
+
 export interface AppConfig {
   rootPath: string
   lastSubjectId: string
@@ -9,7 +11,7 @@ export interface AppConfig {
 export interface NoteMeta {
   fileName: string
   title: string
-  kind: 'notes' | 'essays'
+  kind: NoteKind
   updatedAt: number
   size: number
 }
@@ -61,8 +63,11 @@ export function saveAppConfig(userDataPath: string, config: AppConfig): AppConfi
 export function ensureSubjectDirs(rootPath: string, subjectId: string): void {
   ensureDir(join(rootPath, subjectId, 'notes'))
   ensureDir(join(rootPath, subjectId, 'essays'))
+  ensureDir(join(rootPath, subjectId, 'cases'))
   ensureDir(join(rootPath, subjectId, 'notes', 'assets'))
   ensureDir(join(rootPath, subjectId, 'essays', 'assets'))
+  ensureDir(join(rootPath, subjectId, 'cases', 'assets'))
+  ensureDir(join(rootPath, subjectId, 'essays', '.guides'))
 }
 
 export interface SavedImage {
@@ -82,7 +87,7 @@ function extFromMime(mime: string): string {
 export function saveNoteImage(payload: {
   rootPath: string
   subjectId: string
-  kind: 'notes' | 'essays'
+  kind: NoteKind
   bytes: Uint8Array | Buffer
   mimeType?: string
 }): SavedImage {
@@ -102,7 +107,7 @@ export function saveNoteImage(payload: {
 export function readNoteImageDataUrl(payload: {
   rootPath: string
   subjectId: string
-  kind: 'notes' | 'essays'
+  kind: NoteKind
   relativePath: string
 }): string | null {
   const rel = payload.relativePath.replace(/^(\.\/)+/, '').replace(/\\/g, '/')
@@ -138,7 +143,7 @@ const ORDER_FILE = '.order.json'
 function orderFilePath(
   rootPath: string,
   subjectId: string,
-  kind: 'notes' | 'essays',
+  kind: NoteKind,
 ): string {
   return join(rootPath, subjectId, kind, ORDER_FILE)
 }
@@ -146,7 +151,7 @@ function orderFilePath(
 function readOrder(
   rootPath: string,
   subjectId: string,
-  kind: 'notes' | 'essays',
+  kind: NoteKind,
 ): string[] {
   const file = orderFilePath(rootPath, subjectId, kind)
   if (!existsSync(file)) return []
@@ -162,7 +167,7 @@ function readOrder(
 function writeOrder(
   rootPath: string,
   subjectId: string,
-  kind: 'notes' | 'essays',
+  kind: NoteKind,
   fileNames: string[],
 ): void {
   ensureDir(join(rootPath, subjectId, kind))
@@ -190,7 +195,7 @@ function sortNotesByOrder(items: NoteMeta[], order: string[]): NoteMeta[] {
 function upsertOrderEntry(
   rootPath: string,
   subjectId: string,
-  kind: 'notes' | 'essays',
+  kind: NoteKind,
   fileName: string,
   position: 'start' | 'end' = 'start',
 ): void {
@@ -203,7 +208,7 @@ function upsertOrderEntry(
 function removeOrderEntry(
   rootPath: string,
   subjectId: string,
-  kind: 'notes' | 'essays',
+  kind: NoteKind,
   fileName: string,
 ): void {
   const order = readOrder(rootPath, subjectId, kind).filter((f) => f !== fileName)
@@ -213,7 +218,7 @@ function removeOrderEntry(
 function renameOrderEntry(
   rootPath: string,
   subjectId: string,
-  kind: 'notes' | 'essays',
+  kind: NoteKind,
   oldName: string,
   newName: string,
 ): void {
@@ -230,7 +235,7 @@ function renameOrderEntry(
 export function saveNotesOrder(payload: {
   rootPath: string
   subjectId: string
-  kind: 'notes' | 'essays'
+  kind: NoteKind
   fileNames: string[]
 }): NoteMeta[] {
   const { rootPath, subjectId, kind, fileNames } = payload
@@ -250,7 +255,7 @@ export function saveNotesOrder(payload: {
 export function listNotes(
   rootPath: string,
   subjectId: string,
-  kind: 'notes' | 'essays',
+  kind: NoteKind,
 ): NoteMeta[] {
   const dir = join(rootPath, subjectId, kind)
   ensureDir(dir)
@@ -280,7 +285,7 @@ export function listNotes(
 export function readNote(
   rootPath: string,
   subjectId: string,
-  kind: 'notes' | 'essays',
+  kind: NoteKind,
   fileName: string,
 ): NoteContent {
   const full = join(rootPath, subjectId, kind, fileName)
@@ -297,7 +302,7 @@ export function readNote(
 export function writeNote(payload: {
   rootPath: string
   subjectId: string
-  kind: 'notes' | 'essays'
+  kind: NoteKind
   fileName: string
   content: string
   title?: string
@@ -340,18 +345,21 @@ export function writeNote(payload: {
 export function deleteNote(
   rootPath: string,
   subjectId: string,
-  kind: 'notes' | 'essays',
+  kind: NoteKind,
   fileName: string,
 ): void {
   const full = join(rootPath, subjectId, kind, fileName)
   if (existsSync(full)) unlinkSync(full)
   removeOrderEntry(rootPath, subjectId, kind, fileName)
+  if (kind === 'essays') {
+    deleteEssayGuideHistory(rootPath, subjectId, fileName)
+  }
 }
 
 export function renameNote(payload: {
   rootPath: string
   subjectId: string
-  kind: 'notes' | 'essays'
+  kind: NoteKind
   oldName: string
   newName: string
 }): NoteMeta {
@@ -365,6 +373,9 @@ export function renameNote(payload: {
     if (existsSync(to)) throw new Error('同名文件已存在')
     renameSync(from, to)
     renameOrderEntry(rootPath, subjectId, kind, oldName, newName)
+    if (kind === 'essays') {
+      renameEssayGuideHistory(rootPath, subjectId, oldName, newName)
+    }
   }
   const note = readNote(rootPath, subjectId, kind, newName)
   const st = statSync(join(dir, newName))
@@ -374,5 +385,107 @@ export function renameNote(payload: {
     kind,
     updatedAt: note.updatedAt,
     size: st.size,
+  }
+}
+
+const GUIDE_DIR = '.guides'
+const MAX_GUIDE_RECORDS = 20
+
+export interface EssayGuideRecord {
+  id: string
+  createdAt: number
+  guide: Record<string, unknown>
+}
+
+export interface EssayGuideHistory {
+  fileName: string
+  records: EssayGuideRecord[]
+}
+
+function guideHistoryPath(rootPath: string, subjectId: string, fileName: string): string {
+  return join(rootPath, subjectId, 'essays', GUIDE_DIR, `${fileName}.json`)
+}
+
+function emptyGuideHistory(fileName: string): EssayGuideHistory {
+  return { fileName, records: [] }
+}
+
+export function readEssayGuideHistory(
+  rootPath: string,
+  subjectId: string,
+  fileName: string,
+): EssayGuideHistory {
+  if (!fileName) return emptyGuideHistory(fileName)
+  const file = guideHistoryPath(rootPath, subjectId, fileName)
+  if (!existsSync(file)) return emptyGuideHistory(fileName)
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf-8')) as Partial<EssayGuideHistory>
+    const records = Array.isArray(raw.records)
+      ? raw.records.filter(
+          (r): r is EssayGuideRecord =>
+            Boolean(r) && typeof r === 'object' && typeof (r as EssayGuideRecord).id === 'string',
+        )
+      : []
+    return { fileName, records }
+  } catch {
+    return emptyGuideHistory(fileName)
+  }
+}
+
+export function appendEssayGuideHistory(payload: {
+  rootPath: string
+  subjectId: string
+  fileName: string
+  record: EssayGuideRecord
+}): EssayGuideHistory {
+  const { rootPath, subjectId, fileName, record } = payload
+  if (!fileName) return emptyGuideHistory(fileName)
+  ensureDir(join(rootPath, subjectId, 'essays', GUIDE_DIR))
+  const current = readEssayGuideHistory(rootPath, subjectId, fileName)
+  const records = [record, ...current.records.filter((r) => r.id !== record.id)].slice(
+    0,
+    MAX_GUIDE_RECORDS,
+  )
+  const next: EssayGuideHistory = { fileName, records }
+  writeFileSync(
+    guideHistoryPath(rootPath, subjectId, fileName),
+    JSON.stringify(next, null, 2),
+    'utf-8',
+  )
+  return next
+}
+
+export function deleteEssayGuideHistory(
+  rootPath: string,
+  subjectId: string,
+  fileName: string,
+): void {
+  if (!fileName) return
+  const file = guideHistoryPath(rootPath, subjectId, fileName)
+  if (existsSync(file)) unlinkSync(file)
+}
+
+export function renameEssayGuideHistory(
+  rootPath: string,
+  subjectId: string,
+  oldName: string,
+  newName: string,
+): void {
+  if (!oldName || oldName === newName) return
+  const from = guideHistoryPath(rootPath, subjectId, oldName)
+  if (!existsSync(from)) return
+  ensureDir(join(rootPath, subjectId, 'essays', GUIDE_DIR))
+  const to = guideHistoryPath(rootPath, subjectId, newName)
+  if (existsSync(to)) {
+    unlinkSync(from)
+    return
+  }
+  renameSync(from, to)
+  try {
+    const data = JSON.parse(readFileSync(to, 'utf-8')) as EssayGuideHistory
+    data.fileName = newName
+    writeFileSync(to, JSON.stringify(data, null, 2), 'utf-8')
+  } catch {
+    // ignore
   }
 }

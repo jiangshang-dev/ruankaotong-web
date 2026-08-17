@@ -12,10 +12,15 @@ import {
   saveAppConfig,
   saveNoteImage,
   readNoteImageDataUrl,
+  readEssayGuideHistory,
+  appendEssayGuideHistory,
   type NoteMeta,
   type NoteContent,
   type AppConfig,
   type SavedImage,
+  type NoteKind,
+  type EssayGuideHistory,
+  type EssayGuideRecord,
 } from './fs-service'
 
 const isDev = !app.isPackaged
@@ -92,7 +97,7 @@ app.whenReady().then(() => {
       _e,
       rootPath: string,
       subjectId: string,
-      kind: 'notes' | 'essays',
+      kind: NoteKind,
     ): Promise<NoteMeta[]> => {
       return listNotes(rootPath, subjectId, kind)
     },
@@ -105,7 +110,7 @@ app.whenReady().then(() => {
       payload: {
         rootPath: string
         subjectId: string
-        kind: 'notes' | 'essays'
+        kind: NoteKind
         fileNames: string[]
       },
     ): Promise<NoteMeta[]> => {
@@ -119,7 +124,7 @@ app.whenReady().then(() => {
       _e,
       rootPath: string,
       subjectId: string,
-      kind: 'notes' | 'essays',
+      kind: NoteKind,
       fileName: string,
     ): Promise<NoteContent> => {
       return readNote(rootPath, subjectId, kind, fileName)
@@ -133,7 +138,7 @@ app.whenReady().then(() => {
       payload: {
         rootPath: string
         subjectId: string
-        kind: 'notes' | 'essays'
+        kind: NoteKind
         fileName: string
         content: string
         title?: string
@@ -149,7 +154,7 @@ app.whenReady().then(() => {
       _e,
       rootPath: string,
       subjectId: string,
-      kind: 'notes' | 'essays',
+      kind: NoteKind,
       fileName: string,
     ): Promise<void> => {
       deleteNote(rootPath, subjectId, kind, fileName)
@@ -163,7 +168,7 @@ app.whenReady().then(() => {
       payload: {
         rootPath: string
         subjectId: string
-        kind: 'notes' | 'essays'
+        kind: NoteKind
         oldName: string
         newName: string
       },
@@ -184,7 +189,7 @@ app.whenReady().then(() => {
       payload: {
         rootPath: string
         subjectId: string
-        kind: 'notes' | 'essays'
+        kind: NoteKind
         bytes: Uint8Array
         mimeType?: string
       },
@@ -200,11 +205,36 @@ app.whenReady().then(() => {
       payload: {
         rootPath: string
         subjectId: string
-        kind: 'notes' | 'essays'
+        kind: NoteKind
         relativePath: string
       },
     ): Promise<string | null> => {
       return readNoteImageDataUrl(payload)
+    },
+  )
+
+  ipcMain.handle(
+    'essayGuide:read',
+    async (
+      _e,
+      payload: { rootPath: string; subjectId: string; fileName: string },
+    ): Promise<EssayGuideHistory> => {
+      return readEssayGuideHistory(payload.rootPath, payload.subjectId, payload.fileName)
+    },
+  )
+
+  ipcMain.handle(
+    'essayGuide:append',
+    async (
+      _e,
+      payload: {
+        rootPath: string
+        subjectId: string
+        fileName: string
+        record: EssayGuideRecord
+      },
+    ): Promise<EssayGuideHistory> => {
+      return appendEssayGuideHistory(payload)
     },
   )
 

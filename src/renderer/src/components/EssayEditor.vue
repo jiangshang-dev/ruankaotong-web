@@ -1,20 +1,32 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '../stores/app'
 import {
+  extractMarkdownSection,
+  firstMarkdownHeading,
+  listEssayGuideHistory,
   polishEssay,
   scoreEssay,
+  streamEssayGuide,
+  type EssayGuideHistoryRecord,
   type EssayScoreResponse,
   type PolishPart,
 } from '../api/essayAi'
+import { compressImageDataUrl, type CaseImage } from '../api/caseAi'
 import {
   buildEssayMarkdown,
   countExamWords,
+  extractEssayTitle,
+  formatDate,
   joinTopic,
   parseEssayMarkdown,
   sanitizeEssayParts,
   splitTopic,
+  stripCaseTopicText,
 } from '../utils/exam'
+import { collectAssetPaths, markdownToHtml } from '../utils/markdown'
+import MarkdownRichEditor from './MarkdownRichEditor.vue'
+import EssayThinkingBox from './EssayThinkingBox.vue'
 
 const props = defineProps<{
   fileName: string
@@ -36,13 +48,33 @@ const status = ref('')
 const aiLoading = ref('')
 const scoreOpen = ref(false)
 const scoreResult = ref<EssayScoreResponse | null>(null)
+const guideHistory = ref<EssayGuideHistoryRecord[]>([])
+const guideMarkdown = ref('')
+const guideThinking = ref('')
+const selectedGuideId = ref('')
+const draftHistoryKey = ref('')
+const guideStreamEl = ref<HTMLElement | null>(null)
+const guideCollapsed = ref(false)
+const generatingGuide = ref(false)
+let guideAbort: AbortController | null = null
+const editorKey = ref(0)
+
+const media = computed(() =>
+  store.rootPath
+    ? {
+        rootPath: store.rootPath,
+        subjectId: store.subjectId,
+        kind: 'essays' as const,
+      }
+    : null,
+)
 
 /** 摘要 300 字以内；正文约 2000~2500 */
 const ABSTRACT_MAX = 300
 const BODY_MIN = 2000
 const BODY_MAX = 2500
 
-const topicTitle = computed(() => splitTopic(topic.value).title)
+const topicTitle = computed(() => extractEssayTitle(topic.value) || splitTopic(stripCaseTopicText(topic.value)).title)
 const abstractCount = computed(() => countExamWords(abstractText.value))
 const bodyCount = computed(() => countExamWords(body.value))
 const totalCount = computed(() => abstractCount.value + bodyCount.value)
@@ -63,14 +95,34 @@ const bodyClass = computed(() => {
   return ''
 })
 
+const historyFileName = computed(() => currentName.value || draftHistoryKey.value)
+
+const guideHtml = computed(() =>
+  guideMarkdown.value.trim() ? markdownToHtml(guideMarkdown.value) : '',
+)
+const abstractDraft = computed(() => extractMarkdownSection(guideMarkdown.value, '摘要草稿'))
+const bodyOutline = computed(() => extractMarkdownSection(guideMarkdown.value, '正文提纲'))
+const recognizedTopic = computed(
+  () => firstMarkdownHeading(guideMarkdown.value) || topicTitle.value,
+)
+
 async function load(): Promise<void> {
+  if (!generatingGuide.value) {
+    abortGuideStream()
+  }
   if (props.isNew || !props.fileName) {
     topic.value = ''
     abstractText.value = ''
     body.value = ''
     currentName.value = ''
     dirty.value = false
-    status.value = '新建论文练习'
+    draftHistoryKey.value = `draft-${Date.now()}`
+    guideHistory.value = []
+    guideMarkdown.value = ''
+    guideThinking.value = ''
+    selectedGuideId.value = ''
+    status.value = '新建论文练习：题目区可粘贴试卷截图'
+    editorKey.value += 1
     return
   }
   const note = await window.api.readNote(
@@ -86,7 +138,52 @@ async function load(): Promise<void> {
   body.value = cleaned.body
   currentName.value = note.fileName
   dirty.value = false
-  status.value = `已打开 ${note.fileName}`
+  draftHistoryKey.value = ''
+  guideMarkdown.value = ''
+  guideThinking.value = ''
+  selectedGuideId.value = ''
+  await loadGuideHistory(note.fileName)
+  status.value = guideHistory.value.length
+    ? `已打开 ${note.fileName} · ${guideHistory.value.length} 条论文指导`
+    : `已打开 ${note.fileName}`
+  editorKey.value += 1
+}
+
+async function loadGuideHistory(fileName: string): Promise<void> {
+  if (!fileName) {
+    guideHistory.value = []
+    return
+  }
+  try {
+    const records = await listEssayGuideHistory(store.subjectId, fileName)
+    guideHistory.value = records
+    if (!guideMarkdown.value && records.length) {
+      selectGuide(records[0])
+    }
+  } catch (e) {
+    guideHistory.value = []
+    status.value = e instanceof Error ? e.message : '读取指导历史失败'
+  }
+}
+
+function selectGuide(rec: EssayGuideHistoryRecord): void {
+  if (aiLoading.value === 'guide') return
+  selectedGuideId.value = rec.id
+  guideMarkdown.value = rec.markdown || ''
+  guideThinking.value = rec.thinking || ''
+}
+
+function abortGuideStream(): void {
+  if (guideAbort) {
+    guideAbort.abort()
+    guideAbort = null
+  }
+}
+
+async function scrollGuideToBottom(): Promise<void> {
+  await nextTick()
+  const el = guideStreamEl.value
+  if (el) el.scrollTop = el.scrollHeight
 }
 
 watch(
@@ -102,9 +199,9 @@ function markDirty(): void {
 }
 
 async function save(): Promise<void> {
-  const { title } = splitTopic(topic.value)
+  const title = extractEssayTitle(topic.value) || splitTopic(stripCaseTopicText(topic.value)).title
   if (!title) {
-    status.value = '请先填写论文题目（首行作为题目名称）'
+    status.value = '请先填写论文题目（题目区首行文字作为题目名称）'
     return
   }
   store.saving = true
@@ -143,7 +240,10 @@ async function save(): Promise<void> {
     })
     currentName.value = meta.fileName
     dirty.value = false
-    status.value = `已保存 ${meta.fileName}`
+    await loadGuideHistory(currentName.value)
+    status.value = guideHistory.value.length
+      ? `已保存 ${meta.fileName} · ${guideHistory.value.length} 条论文指导`
+      : `已保存 ${meta.fileName}`
     await store.refreshList()
     if (props.isNew || props.fileName !== meta.fileName) {
       emit('created', meta.fileName)
@@ -175,15 +275,114 @@ async function remove(): Promise<void> {
 function buildAiPayload(part: PolishPart) {
   return {
     subject: store.subject.name,
-    topic: topic.value.trim(),
+    topic: stripCaseTopicText(topic.value).trim() || extractEssayTitle(topic.value),
     part,
     abstractText: abstractText.value,
     bodyText: body.value,
   }
 }
 
+async function collectTopicImages(): Promise<CaseImage[]> {
+  if (!media.value) return []
+  const paths = collectAssetPaths(topic.value).slice(0, 8)
+  const images: CaseImage[] = []
+  for (const rel of paths) {
+    const dataUrl = await window.api.readImageDataUrl({
+      rootPath: media.value.rootPath,
+      subjectId: media.value.subjectId,
+      kind: 'essays',
+      relativePath: rel,
+    })
+    if (!dataUrl) continue
+    images.push(await compressImageDataUrl(dataUrl))
+  }
+  return images
+}
+
+function toggleGuide(): void {
+  guideCollapsed.value = !guideCollapsed.value
+}
+
+async function runGuide(): Promise<void> {
+  abortGuideStream()
+  guideCollapsed.value = false
+  generatingGuide.value = true
+  aiLoading.value = 'guide'
+  status.value = '正在识题并流式生成论文指导…'
+  try {
+    const images = await collectTopicImages()
+    const topicText = stripCaseTopicText(topic.value)
+    if (!images.length && !topicText.trim()) {
+      status.value = '请先填写题目或粘贴题目截图'
+      return
+    }
+    if (!draftHistoryKey.value && !currentName.value) {
+      draftHistoryKey.value = `draft-${Date.now()}`
+    }
+    guideMarkdown.value = ''
+    guideThinking.value = ''
+    selectedGuideId.value = ''
+    const controller = new AbortController()
+    guideAbort = controller
+    const rec = await streamEssayGuide(
+      {
+        subject: store.subject.name,
+        subjectId: store.subjectId,
+        fileName: historyFileName.value,
+        topic: topicText,
+        abstractText: abstractText.value,
+        bodyText: body.value,
+        images,
+      },
+      (chunk) => {
+        guideMarkdown.value = chunk.markdown
+        guideThinking.value = chunk.thinking
+        void scrollGuideToBottom()
+      },
+      controller.signal,
+    )
+    selectedGuideId.value = rec.id
+    if (rec.topic && !extractEssayTitle(topic.value)) {
+      topic.value = `${rec.topic}\n\n${topic.value}`.trim()
+      dirty.value = true
+    }
+    await loadGuideHistory(historyFileName.value)
+    status.value = '论文指导已写入历史'
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      status.value = '已停止生成指导'
+      return
+    }
+    status.value = e instanceof Error ? e.message : '指导失败'
+  } finally {
+    if (guideAbort && !guideAbort.signal.aborted) {
+      guideAbort = null
+    }
+    aiLoading.value = ''
+    generatingGuide.value = false
+  }
+}
+
+function applyAbstractDraft(): void {
+  const draft = abstractDraft.value
+  if (!draft) return
+  if (abstractText.value.trim() && !confirm('将覆盖当前摘要，是否继续？')) return
+  abstractText.value = draft
+  dirty.value = true
+  status.value = '已写入摘要草稿，请按自己的项目改写后保存'
+}
+
+function applyBodyOutline(): void {
+  const outline = bodyOutline.value
+  if (!outline) return
+  if (body.value.trim() && !confirm('将覆盖当前正文，是否继续？')) return
+  body.value = outline
+  dirty.value = true
+  status.value = '已写入正文提纲，请按项目举例展开成文'
+}
+
 async function runPolish(part: PolishPart): Promise<void> {
-  if (!topic.value.trim()) {
+  if (!extractEssayTitle(topic.value) && !stripCaseTopicText(topic.value).trim()) {
     status.value = '请先填写论文题目'
     return
   }
@@ -228,7 +427,7 @@ async function runPolish(part: PolishPart): Promise<void> {
 }
 
 async function runScore(): Promise<void> {
-  if (!topic.value.trim()) {
+  if (!extractEssayTitle(topic.value) && !stripCaseTopicText(topic.value).trim()) {
     status.value = '请先填写论文题目'
     return
   }
@@ -241,7 +440,7 @@ async function runScore(): Promise<void> {
   try {
     const res = await scoreEssay({
       subject: store.subject.name,
-      topic: topic.value.trim(),
+      topic: stripCaseTopicText(topic.value).trim() || extractEssayTitle(topic.value),
       abstractText: abstractText.value,
       bodyText: body.value,
     })
@@ -263,11 +462,14 @@ function onKeydown(e: KeyboardEvent): void {
 }
 
 onMounted(() => window.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  abortGuideStream()
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <template>
-  <div class="essay-layout">
+  <div class="essay-layout" :class="{ 'guide-collapsed': guideCollapsed }">
     <div class="editor-toolbar" style="padding: 0; border: none">
       <div class="status">{{ status }}{{ dirty ? ' · 未保存' : '' }}</div>
       <div class="actions">
@@ -303,6 +505,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           保存
         </button>
         <button class="btn danger" :disabled="!!aiLoading" @click="remove">删除</button>
+        <button
+          class="btn light"
+          type="button"
+          :title="guideCollapsed ? '展开论文指导' : '收起论文指导'"
+          @click="toggleGuide"
+        >
+          {{ guideCollapsed ? '显示指导' : '隐藏指导' }}
+        </button>
       </div>
     </div>
 
@@ -310,14 +520,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       <div class="essay-panel essay-panel--topic">
         <div class="panel-head">
           <strong>论文题目</strong>
-          <span class="status">首行作题目名称，下方粘贴题目描述与要求</span>
+          <span class="status">首行文字作题目名称；可粘贴试卷截图，模型识图后给指导</span>
         </div>
-        <div class="field">
-          <textarea
+        <div class="field essay-topic-editor">
+          <MarkdownRichEditor
+            :key="editorKey"
             v-model="topic"
-            class="prompt-area"
-            placeholder="论大模型智能运维技术及应用&#10;&#10;近年来，大模型技术快速发展……&#10;&#10;请以「论大模型智能运维技术及应用」为题，依次论述以下三个方面：&#10;1. 简要叙述你参与的软件开发项目……"
-            @input="markDirty"
+            :media="media"
+            placeholder="论大模型智能运维技术及应用&#10;&#10;可在此粘贴题目截图，或继续写题目背景与三点要求…"
+            @change="markDirty"
           />
         </div>
       </div>
@@ -352,6 +563,97 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         </div>
       </div>
     </div>
+
+    <aside class="guide-board">
+      <button
+        v-if="guideCollapsed"
+        class="pane-rail pane-rail--right"
+        type="button"
+        title="展开论文指导"
+        @click="toggleGuide"
+      >
+        <span>论文指导</span>
+      </button>
+      <div class="guide-board-head">
+        <div class="guide-board-title">
+          <strong>论文指导</strong>
+          <span class="status">
+            {{
+              aiLoading === 'guide'
+                ? '正在流式生成…'
+                : recognizedTopic || '按题目生成写作方案'
+            }}
+          </span>
+        </div>
+        <div class="actions">
+          <button
+            class="btn"
+            :disabled="!!aiLoading"
+            @click="runGuide"
+          >
+            {{ aiLoading === 'guide' ? '生成中…' : '生成指导' }}
+          </button>
+          <button
+            v-if="abstractDraft"
+            class="btn light"
+            :disabled="aiLoading === 'guide'"
+            @click="applyAbstractDraft"
+          >
+            写入摘要草稿
+          </button>
+          <button
+            v-if="bodyOutline"
+            class="btn light"
+            :disabled="aiLoading === 'guide'"
+            @click="applyBodyOutline"
+          >
+            写入正文提纲
+          </button>
+          <button
+            class="pane-toggle"
+            type="button"
+            title="收起论文指导"
+            @click="toggleGuide"
+          >
+            ›
+          </button>
+        </div>
+      </div>
+      <div class="guide-board-body">
+        <div class="guide-history">
+          <div class="guide-history-label">历史记录</div>
+          <button
+            v-for="rec in guideHistory"
+            :key="rec.id"
+            class="guide-history-item"
+            :class="{ active: rec.id === selectedGuideId }"
+            :disabled="aiLoading === 'guide'"
+            @click="selectGuide(rec)"
+          >
+            <span class="guide-history-topic">{{ rec.topic || recognizedTopic || '论文指导' }}</span>
+            <span class="guide-history-time">{{ formatDate(rec.createdAt) }}</span>
+          </button>
+          <div v-if="!guideHistory.length" class="guide-history-empty">
+            生成后会记入会话历史，下次打开还能看
+          </div>
+        </div>
+        <div ref="guideStreamEl" class="guide-stream">
+          <EssayThinkingBox
+            :thinking="guideThinking"
+            :loading="aiLoading === 'guide'"
+          />
+          <pre
+            v-if="guideMarkdown && aiLoading === 'guide'"
+            class="guide-stream-raw"
+          >{{ guideMarkdown }}</pre>
+          <div v-else-if="guideHtml" class="guide-md" v-html="guideHtml" />
+          <span v-if="aiLoading === 'guide' && guideMarkdown" class="guide-caret" />
+          <div v-else-if="!guideMarkdown && !guideThinking && aiLoading !== 'guide'" class="guide-empty">
+            在左侧填写或粘贴题目截图，点「生成指导」。思考会收进上方思考框，指导正文会边生成边出现。
+          </div>
+        </div>
+      </div>
+    </aside>
 
     <div class="word-bar">
       <span class="word-chip" :class="abstractClass">
@@ -417,5 +719,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         </div>
       </div>
     </div>
+
   </div>
 </template>

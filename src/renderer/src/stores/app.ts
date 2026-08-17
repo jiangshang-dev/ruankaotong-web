@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getSubject } from '../data/subjects'
 
-export type NoteKind = 'notes' | 'essays'
+export type NoteKind = 'notes' | 'essays' | 'cases'
 
 export interface NoteMeta {
   fileName: string

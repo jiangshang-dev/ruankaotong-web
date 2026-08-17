@@ -49,6 +49,18 @@ export function joinTopic(title: string, prompt: string): string {
   return `${t}\n\n${p}`
 }
 
+/** 从题目区 Markdown 取标题：跳过图片行，取首行可见文字 */
+export function extractEssayTitle(topicMd: string): string {
+  const lines = topicMd.replace(/\r\n/g, '\n').split('\n')
+  for (const line of lines) {
+    const t = line.trim()
+    if (!t) continue
+    if (/^!\[[^\]]*]\([^)]*\)/.test(t) || /^<img\b/i.test(t)) continue
+    return t.replace(/^#{1,6}\s*/, '').replace(/\*\*/g, '').trim()
+  }
+  return ''
+}
+
 const FRONT_MATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
 
 function escapeRegExp(s: string): string {
@@ -291,4 +303,114 @@ export function parseNoteMarkdown(content: string): { title: string; body: strin
   // 去掉正文顶部重复的主标题（历史多次保存产生的脏数据）
   const body = stripLeadingTitleHeading(rest, resolvedTitle)
   return { title: resolvedTitle, body }
+}
+
+export interface CaseParts {
+  title: string
+  /** 题目区 Markdown，可含截图 */
+  topic: string
+  /** 考生作答，按题号书写即可 */
+  answer: string
+}
+
+const CASE_SECTION_LINE_RE = /^##\s*(题目|答案)\s*$/gm
+
+function findCaseSectionRanges(text: string): {
+  topic?: { start: number; end: number }
+  answer?: { start: number; end: number }
+} {
+  const normalized = text.replace(/\r\n/g, '\n')
+  const headers: {
+    name: 'topic' | 'answer'
+    lineStart: number
+    contentStart: number
+  }[] = []
+  CASE_SECTION_LINE_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = CASE_SECTION_LINE_RE.exec(normalized))) {
+    headers.push({
+      name: m[1] === '题目' ? 'topic' : 'answer',
+      lineStart: m.index,
+      contentStart: m.index + m[0].length,
+    })
+  }
+  const ranges: {
+    topic?: { start: number; end: number }
+    answer?: { start: number; end: number }
+  } = {}
+  for (let i = 0; i < headers.length; i++) {
+    const cur = headers[i]
+    const end =
+      i + 1 < headers.length ? headers[i + 1].lineStart : normalized.length
+    ranges[cur.name] = { start: cur.contentStart, end }
+  }
+  return ranges
+}
+
+export function stripCaseTopicText(md: string): string {
+  return md
+    .replace(/!\[[^\]]*]\([^)]+\)/g, '')
+    .replace(/<img[^>]*>/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+export function buildCaseMarkdown(parts: CaseParts): string {
+  const title = parts.title.trim() || '未命名案例分析'
+  return `---
+title: "${title.replace(/"/g, '\\"')}"
+type: case
+updatedAt: "${new Date().toISOString()}"
+---
+
+# ${title}
+
+## 题目
+
+${parts.topic.trim()}
+
+## 答案
+
+${parts.answer.trim()}
+`
+}
+
+export function parseCaseMarkdown(content: string): CaseParts {
+  let rest = content.replace(/\r\n/g, '\n')
+  let title = ''
+  const fm = rest.match(FRONT_MATTER_RE)
+  if (fm) {
+    const titleLine = fm[1].match(/^title:\s*(.+)$/m)
+    if (titleLine) title = titleLine[1].trim().replace(/^["']|["']$/g, '')
+    rest = rest.slice(fm[0].length)
+  }
+  const h1 = rest.match(/^#\s+(.+)\s*$/m)
+  if (h1 && !title) title = h1[1].trim()
+
+  const ranges = findCaseSectionRanges(rest)
+  let topic = sliceSection(rest, ranges.topic)
+  let answer = sliceSection(rest, ranges.answer)
+
+  if (!topic && !ranges.topic) {
+    const ansIdx = rest.search(/^##\s*答案\s*$/m)
+    if (ansIdx >= 0) {
+      topic = rest
+        .slice(0, ansIdx)
+        .replace(/^#\s+.+?\n+/, '')
+        .trim()
+      answer = rest.slice(ansIdx).replace(/^##\s*答案\s*/, '').trim()
+    } else {
+      topic = rest.replace(/^#\s+.+?\n+/, '').trim()
+    }
+  }
+
+  if (title) {
+    topic = stripLeadingTitleHeading(topic, title)
+  }
+
+  return {
+    title: title || '未命名案例分析',
+    topic,
+    answer,
+  }
 }

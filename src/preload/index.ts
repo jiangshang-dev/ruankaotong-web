@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-export type NoteKind = 'notes' | 'essays'
+export type NoteKind = 'notes' | 'essays' | 'cases'
 
 export interface AppConfig {
   rootPath: string
@@ -93,6 +93,23 @@ const api = {
     relativePath: string
   }): Promise<string | null> =>
     ipcRenderer.invoke('notes:readImageDataUrl', payload),
+  readEssayGuide: (payload: {
+    rootPath: string
+    subjectId: string
+    fileName: string
+  }): Promise<{
+    fileName: string
+    records: Array<{ id: string; createdAt: number; guide: unknown }>
+  }> => ipcRenderer.invoke('essayGuide:read', payload),
+  appendEssayGuide: (payload: {
+    rootPath: string
+    subjectId: string
+    fileName: string
+    record: { id: string; createdAt: number; guide: unknown }
+  }): Promise<{
+    fileName: string
+    records: Array<{ id: string; createdAt: number; guide: unknown }>
+  }> => ipcRenderer.invoke('essayGuide:append', payload),
 }
 
 contextBridge.exposeInMainWorld('api', api)
