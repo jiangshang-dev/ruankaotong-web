@@ -27,6 +27,7 @@ import {
 import { collectAssetPaths, markdownToHtml } from '../utils/markdown'
 import MarkdownRichEditor from './MarkdownRichEditor.vue'
 import EssayThinkingBox from './EssayThinkingBox.vue'
+import PolishDiffModal from './PolishDiffModal.vue'
 
 const props = defineProps<{
   fileName: string
@@ -48,6 +49,10 @@ const status = ref('')
 const aiLoading = ref('')
 const scoreOpen = ref(false)
 const scoreResult = ref<EssayScoreResponse | null>(null)
+const polishOpen = ref(false)
+const polishTitle = ref('确认 AI 润色')
+const polishSections = ref<{ label: string; from: string; to: string }[]>([])
+const polishPending = ref<{ abstract: string; body: string } | null>(null)
 const guideHistory = ref<EssayGuideHistoryRecord[]>([])
 const guideMarkdown = ref('')
 const guideThinking = ref('')
@@ -419,16 +424,54 @@ async function runPolish(part: PolishPart): Promise<void> {
           ? res.bodyText || body.value
           : body.value,
     })
-    topic.value = joinTopic(cleaned.title, cleaned.prompt)
-    abstractText.value = cleaned.abstract
-    body.value = cleaned.body
-    dirty.value = true
-    status.value = 'AI 润色完成，请检查后保存'
+    const sections: { label: string; from: string; to: string }[] = []
+    if (part === 'abstract' || part === 'all') {
+      sections.push({
+        label: '摘要',
+        from: abstractText.value,
+        to: cleaned.abstract,
+      })
+    }
+    if (part === 'body' || part === 'all') {
+      sections.push({
+        label: '正文',
+        from: body.value,
+        to: cleaned.body,
+      })
+    }
+    polishPending.value = { abstract: cleaned.abstract, body: cleaned.body }
+    polishSections.value = sections
+    polishTitle.value =
+      part === 'abstract' ? '确认润色摘要' : part === 'body' ? '确认润色正文' : '确认润色摘要与正文'
+    polishOpen.value = true
+    status.value = 'AI 润色完成，请确认是否接受'
   } catch (e) {
     status.value = e instanceof Error ? e.message : '润色失败'
   } finally {
     aiLoading.value = ''
   }
+}
+
+function acceptPolish(): void {
+  const pending = polishPending.value
+  if (pending) {
+    abstractText.value = pending.abstract
+    body.value = pending.body
+    dirty.value = true
+    status.value = '已接受 AI 润色，请检查后保存'
+  }
+  closePolish()
+}
+
+function rejectPolish(): void {
+  status.value = '已放弃本次润色，原文未改'
+  closePolish()
+}
+
+function closePolish(): void {
+  polishOpen.value = false
+  polishPending.value = null
+  polishSections.value = []
 }
 
 async function runScore(): Promise<void> {
@@ -751,6 +794,14 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+
+    <PolishDiffModal
+      :open="polishOpen"
+      :title="polishTitle"
+      :sections="polishSections"
+      @accept="acceptPolish"
+      @reject="rejectPolish"
+    />
 
   </div>
 </template>
