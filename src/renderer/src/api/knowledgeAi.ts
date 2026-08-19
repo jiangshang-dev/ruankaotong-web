@@ -10,6 +10,7 @@ export interface KnowledgeTutorHistoryRecord {
   topic: string
   markdown: string
   thinking?: string
+  role?: 'user' | 'assistant' | string
 }
 
 export interface KnowledgeTutorStreamEvent {
@@ -30,6 +31,20 @@ export interface KnowledgeTutorStreamChunk {
 export function firstMarkdownHeading(md: string): string {
   const m = md.match(/^#\s+(.+)$/m)
   return m ? m[1].trim() : ''
+}
+
+export function extractUserQuestion(raw: string): string {
+  const text = String(raw || '').trim()
+  if (!text) return ''
+  const ask = text.lastIndexOf('追问：')
+  if (ask >= 0) return text.slice(ask + 3).trim()
+  const req = text.indexOf('考生本次要求：')
+  if (req >= 0) {
+    const rest = text.slice(req + 7).trim()
+    const cut = rest.indexOf('\n\n请按系统要求')
+    return (cut >= 0 ? rest.slice(0, cut) : rest).trim()
+  }
+  return text.length > 200 ? `${text.slice(0, 200)}…` : text
 }
 
 export async function listKnowledgeTutorHistory(

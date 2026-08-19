@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '../stores/app'
 import {
+  extractUserQuestion,
   firstMarkdownHeading,
   listKnowledgeTutorHistory,
   streamKnowledgeTutor,
@@ -30,6 +31,16 @@ const emit = defineEmits<{
   deleted: []
 }>()
 
+type TutorTurn = {
+  id: string
+  role: 'user' | 'assistant'
+  topic: string
+  markdown: string
+  thinking: string
+  createdAt: number
+  streaming?: boolean
+}
+
 const store = useAppStore()
 const title = ref('')
 const body = ref('')
@@ -39,8 +50,7 @@ const status = ref('')
 const editorKey = ref(0)
 const aiLoading = ref('')
 const tutorHistory = ref<KnowledgeTutorHistoryRecord[]>([])
-const tutorMarkdown = ref('')
-const tutorThinking = ref('')
+const tutorTurns = ref<TutorTurn[]>([])
 const selectedTutorId = ref('')
 const draftHistoryKey = ref('')
 const tutorStreamEl = ref<HTMLElement | null>(null)
@@ -49,6 +59,14 @@ const historyCollapsed = ref(false)
 const generatingTutor = ref(false)
 const askText = ref('')
 let tutorAbort: AbortController | null = null
+const GUIDE_WIDTH_KEY = 'ruankao.noteGuideWidth'
+const MIN_GUIDE_WIDTH = 360
+const MIN_EDITOR_WIDTH = 280
+const layoutEl = ref<HTMLElement | null>(null)
+const guideWidth = ref(0)
+const resizing = ref(false)
+let splitMove: ((e: MouseEvent) => void) | null = null
+let splitUp: (() => void) | null = null
 
 const media = computed(() =>
   store.rootPath
@@ -62,13 +80,48 @@ const media = computed(() =>
 
 const wordCount = computed(() => countExamWords(`${title.value}\n${body.value}`))
 const historyFileName = computed(() => currentName.value || draftHistoryKey.value)
-const tutorHtml = computed(() =>
-  tutorMarkdown.value.trim() ? markdownToHtml(tutorMarkdown.value) : '',
+const recognizedTitle = computed(() => {
+  const last = [...tutorTurns.value]
+    .reverse()
+    .find((turn) => turn.role === 'assistant' && turn.markdown.trim())
+  return firstMarkdownHeading(last?.markdown || '') || title.value
+})
+const hasTutorSession = computed(() =>
+  tutorTurns.value.some((turn) => turn.role === 'assistant' && !turn.streaming),
 )
-const recognizedTitle = computed(
-  () => firstMarkdownHeading(tutorMarkdown.value) || title.value,
-)
-const hasTutorSession = computed(() => tutorHistory.value.length > 0)
+const layoutStyle = computed(() => {
+  if (guideCollapsed.value || !guideWidth.value) return undefined
+  return {
+    gridTemplateColumns: `minmax(${MIN_EDITOR_WIDTH}px, 1fr) 8px ${guideWidth.value}px`,
+  }
+})
+
+function turnHtml(markdown: string): string {
+  return markdown.trim() ? markdownToHtml(markdown) : ''
+}
+
+function displayUserText(markdown: string): string {
+  const text = String(markdown || '').trim()
+  if (!text) return ''
+  if (text.includes('请针对当前笔记主题做综合知识系统辅导')) return '生成辅导'
+  return text
+}
+
+function toTurns(records: KnowledgeTutorHistoryRecord[]): TutorTurn[] {
+  return [...records].reverse().map((rec) => {
+    const role = rec.role === 'user' ? 'user' : 'assistant'
+    const markdown =
+      role === 'user' ? extractUserQuestion(rec.markdown || rec.topic || '') : rec.markdown || ''
+    return {
+      id: rec.id,
+      role,
+      topic: rec.topic || (role === 'user' ? displayUserText(markdown).slice(0, 36) : ''),
+      markdown: role === 'user' ? displayUserText(markdown) : markdown,
+      thinking: rec.thinking || '',
+      createdAt: rec.createdAt,
+    }
+  })
+}
 
 async function load(): Promise<void> {
   if (!generatingTutor.value) {
@@ -81,8 +134,7 @@ async function load(): Promise<void> {
     dirty.value = false
     draftHistoryKey.value = `draft-${Date.now()}`
     tutorHistory.value = []
-    tutorMarkdown.value = ''
-    tutorThinking.value = ''
+    tutorTurns.value = []
     selectedTutorId.value = ''
     askText.value = ''
     status.value = '新建笔记：右侧可生成综合知识 AI 辅导'
@@ -101,8 +153,7 @@ async function load(): Promise<void> {
   currentName.value = note.fileName
   dirty.value = false
   draftHistoryKey.value = ''
-  tutorMarkdown.value = ''
-  tutorThinking.value = ''
+  tutorTurns.value = []
   selectedTutorId.value = ''
   askText.value = ''
   await loadTutorHistory(note.fileName)
@@ -112,19 +163,25 @@ async function load(): Promise<void> {
   editorKey.value += 1
 }
 
-async function loadTutorHistory(fileName: string): Promise<void> {
+async function loadTutorHistory(fileName: string, replaceThread = true): Promise<void> {
   if (!fileName) {
     tutorHistory.value = []
+    if (replaceThread) tutorTurns.value = []
     return
   }
   try {
     const records = await listKnowledgeTutorHistory(store.subjectId, fileName)
     tutorHistory.value = records
-    if (!tutorMarkdown.value && records.length) {
-      selectTutor(records[0])
+    if (replaceThread) {
+      tutorTurns.value = toTurns(records)
+      const lastAsst = [...tutorTurns.value].reverse().find((turn) => turn.role === 'assistant')
+      selectedTutorId.value = lastAsst?.id || ''
     }
   } catch (e) {
-    tutorHistory.value = []
+    if (replaceThread) {
+      tutorHistory.value = []
+      tutorTurns.value = []
+    }
     status.value = e instanceof Error ? e.message : '读取辅导历史失败'
   }
 }
@@ -132,8 +189,10 @@ async function loadTutorHistory(fileName: string): Promise<void> {
 function selectTutor(rec: KnowledgeTutorHistoryRecord): void {
   if (aiLoading.value === 'tutor') return
   selectedTutorId.value = rec.id
-  tutorMarkdown.value = rec.markdown || ''
-  tutorThinking.value = rec.thinking || ''
+  void nextTick(() => {
+    const el = document.getElementById(`tutor-turn-${rec.id}`)
+    el?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  })
 }
 
 function abortTutorStream(): void {
@@ -185,7 +244,7 @@ async function save(): Promise<void> {
     })
     currentName.value = meta.fileName
     dirty.value = false
-    await loadTutorHistory(currentName.value)
+    await loadTutorHistory(currentName.value, tutorTurns.value.length === 0)
     status.value = `已保存 ${meta.fileName}`
     await store.refreshList()
     if (props.isNew || props.fileName !== meta.fileName) {
@@ -222,6 +281,47 @@ function toggleHistory(): void {
   historyCollapsed.value = !historyCollapsed.value
 }
 
+function clampGuideWidth(next: number): number {
+  const layout = layoutEl.value
+  const max = layout
+    ? Math.max(MIN_GUIDE_WIDTH, layout.clientWidth - MIN_EDITOR_WIDTH - 8)
+    : 900
+  return Math.round(Math.min(max, Math.max(MIN_GUIDE_WIDTH, next)))
+}
+
+function stopSplitDrag(): void {
+  if (splitMove) window.removeEventListener('mousemove', splitMove)
+  if (splitUp) window.removeEventListener('mouseup', splitUp)
+  splitMove = null
+  splitUp = null
+  if (resizing.value) {
+    resizing.value = false
+    document.body.style.removeProperty('cursor')
+    document.body.style.removeProperty('user-select')
+    try {
+      localStorage.setItem(GUIDE_WIDTH_KEY, String(guideWidth.value))
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function onSplitDown(e: MouseEvent): void {
+  if (guideCollapsed.value) return
+  e.preventDefault()
+  const startX = e.clientX
+  const startW = guideWidth.value || layoutEl.value?.querySelector('.guide-board')?.clientWidth || 560
+  resizing.value = true
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  splitMove = (ev: MouseEvent) => {
+    guideWidth.value = clampGuideWidth(startW - (ev.clientX - startX))
+  }
+  splitUp = () => stopSplitDrag()
+  window.addEventListener('mousemove', splitMove)
+  window.addEventListener('mouseup', splitUp)
+}
+
 async function runTutor(question = '', followUp = false): Promise<void> {
   const q = question.trim()
   if (!title.value.trim() && !body.value.trim() && !q) {
@@ -233,13 +333,32 @@ async function runTutor(question = '', followUp = false): Promise<void> {
   generatingTutor.value = true
   aiLoading.value = 'tutor'
   status.value = followUp ? '正在根据追问继续辅导…' : '正在生成综合知识 AI 辅导…'
+  const streamId = `stream-${Date.now()}`
   try {
     if (!draftHistoryKey.value && !currentName.value) {
       draftHistoryKey.value = `draft-${Date.now()}`
     }
-    tutorMarkdown.value = ''
-    tutorThinking.value = ''
-    selectedTutorId.value = ''
+    tutorTurns.value = tutorTurns.value.filter((turn) => !turn.streaming)
+    if (q) {
+      tutorTurns.value.push({
+        id: `user-${Date.now()}`,
+        role: 'user',
+        topic: q.slice(0, 36),
+        markdown: q,
+        thinking: '',
+        createdAt: Date.now(),
+      })
+    }
+    tutorTurns.value.push({
+      id: streamId,
+      role: 'assistant',
+      topic: '',
+      markdown: '',
+      thinking: '',
+      createdAt: Date.now(),
+      streaming: true,
+    })
+    selectedTutorId.value = streamId
     const controller = new AbortController()
     tutorAbort = controller
     await streamKnowledgeTutor(
@@ -253,21 +372,25 @@ async function runTutor(question = '', followUp = false): Promise<void> {
         followUp,
       },
       (chunk) => {
-        tutorMarkdown.value = chunk.markdown
-        tutorThinking.value = chunk.thinking
+        const idx = tutorTurns.value.findIndex((turn) => turn.id === streamId)
+        if (idx >= 0) {
+          tutorTurns.value[idx] = {
+            ...tutorTurns.value[idx],
+            markdown: chunk.markdown,
+            thinking: chunk.thinking,
+          }
+        }
         void scrollTutorToBottom()
       },
       controller.signal,
     )
-    await loadTutorHistory(historyFileName.value)
-    const latest = tutorHistory.value[0]
-    if (latest) {
-      selectedTutorId.value = latest.id
-      if (latest.thinking) tutorThinking.value = latest.thinking
-      if (latest.markdown) tutorMarkdown.value = latest.markdown
-    }
-    status.value = followUp ? '追问已写入会话历史' : '综合知识辅导已写入历史，可继续追问'
+    await loadTutorHistory(historyFileName.value, true)
+    status.value = followUp ? '追问已追加到当前对话' : '综合知识辅导已写入对话，可继续追问'
+    void scrollTutorToBottom()
   } catch (e) {
+    tutorTurns.value = tutorTurns.value.map((turn) =>
+      turn.id === streamId ? { ...turn, streaming: false } : turn,
+    )
     if (e instanceof DOMException && e.name === 'AbortError') {
       status.value = '已停止生成辅导'
       return
@@ -306,20 +429,34 @@ function onKeydown(e: KeyboardEvent): void {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+  const saved = Number(localStorage.getItem(GUIDE_WIDTH_KEY) || '')
+  if (Number.isFinite(saved) && saved >= MIN_GUIDE_WIDTH) {
+    guideWidth.value = clampGuideWidth(saved)
+  } else if (layoutEl.value) {
+    guideWidth.value = clampGuideWidth(Math.round(layoutEl.value.clientWidth * 0.5))
+  } else {
+    guideWidth.value = 560
+  }
+})
 onBeforeUnmount(() => {
   abortTutorStream()
+  stopSplitDrag()
   window.removeEventListener('keydown', onKeydown)
 })
 </script>
 
 <template>
   <div
-    class="essay-layout"
+    ref="layoutEl"
+    class="essay-layout note-tutor-layout"
     :class="{
       'guide-collapsed': guideCollapsed,
       'history-collapsed': historyCollapsed,
+      'is-resizing': resizing,
     }"
+    :style="layoutStyle"
   >
     <div class="editor-toolbar" style="padding: 0; border: none">
       <div class="status">{{ status }}{{ dirty ? ' · 未保存' : '' }}</div>
@@ -365,6 +502,13 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <div
+      v-if="!guideCollapsed"
+      class="pane-splitter"
+      title="拖动调整左右宽度"
+      @mousedown="onSplitDown"
+    />
+
     <aside class="guide-board">
       <button
         v-if="guideCollapsed"
@@ -403,7 +547,7 @@ onBeforeUnmount(() => {
       <div class="guide-board-body">
         <div class="guide-history" :class="{ collapsed: historyCollapsed }">
           <div class="guide-history-head">
-            <div class="guide-history-label">历史记录</div>
+            <div class="guide-history-label">对话</div>
             <button
               class="pane-toggle"
               type="button"
@@ -420,39 +564,87 @@ onBeforeUnmount(() => {
             title="展开历史记录"
             @click="toggleHistory"
           >
-            <span>历史记录</span>
+            <span>对话</span>
           </button>
           <div class="guide-history-list">
             <button
               v-for="rec in tutorHistory"
               :key="rec.id"
               class="guide-history-item"
-              :class="{ active: rec.id === selectedTutorId }"
+              :class="{ active: rec.id === selectedTutorId, user: rec.role === 'user' }"
               :disabled="aiLoading === 'tutor'"
               @click="selectTutor(rec)"
             >
-              <span class="guide-history-topic">{{ rec.topic || recognizedTitle || '综合知识辅导' }}</span>
+              <span class="guide-history-topic">
+                {{
+                  rec.role === 'user'
+                    ? rec.topic || '追问'
+                    : rec.topic || recognizedTitle || '综合知识辅导'
+                }}
+              </span>
               <span class="guide-history-time">{{ formatDate(rec.createdAt) }}</span>
             </button>
             <div v-if="!tutorHistory.length" class="guide-history-empty">
-              生成后会记入会话历史，下次打开还能看
+              生成后会记入同一会话，追问不会丢掉前面的讲解
             </div>
           </div>
         </div>
-        <div ref="tutorStreamEl" class="guide-stream">
-          <EssayThinkingBox
-            :thinking="tutorThinking"
-            :loading="aiLoading === 'tutor'"
-          />
-          <pre
-            v-if="tutorMarkdown && aiLoading === 'tutor'"
-            class="guide-stream-raw"
-          >{{ tutorMarkdown }}</pre>
-          <div v-else-if="tutorHtml" class="guide-md" v-html="tutorHtml" />
-          <span v-if="aiLoading === 'tutor' && tutorMarkdown" class="guide-caret" />
-          <div v-else-if="!tutorMarkdown && !tutorThinking && aiLoading !== 'tutor'" class="guide-empty">
-            在左侧写下知识点，点「生成辅导」。思考默认折叠，讲解会边生成边出现；生成后可在下方追问。
+        <div ref="tutorStreamEl" class="guide-stream tutor-chat">
+          <div
+            v-if="!tutorTurns.length && aiLoading !== 'tutor'"
+            class="guide-empty"
+          >
+            在左侧写下知识点，点「生成辅导」。追问会像聊天一样追加在下面，向上滚还能看到前面的内容。
           </div>
+          <article
+            v-for="turn in tutorTurns"
+            :id="`tutor-turn-${turn.id}`"
+            :key="turn.id"
+            class="chat-row"
+            :class="turn.role === 'user' ? 'chat-row--user' : 'chat-row--ai'"
+          >
+            <template v-if="turn.role === 'user'">
+              <div class="chat-col">
+                <div class="chat-meta">
+                  <span>{{ formatDate(turn.createdAt) }}</span>
+                  <strong>我</strong>
+                </div>
+                <div class="chat-bubble chat-bubble--user">{{ turn.markdown }}</div>
+              </div>
+              <div class="chat-avatar chat-avatar--user" aria-hidden="true">我</div>
+            </template>
+            <template v-else>
+              <div class="chat-avatar chat-avatar--ai" aria-hidden="true">AI</div>
+              <div class="chat-col">
+                <div class="chat-meta">
+                  <strong>AI 辅导</strong>
+                  <span>{{ formatDate(turn.createdAt) }}</span>
+                </div>
+                <EssayThinkingBox
+                  :thinking="turn.thinking"
+                  :loading="!!turn.streaming && aiLoading === 'tutor'"
+                />
+                <div
+                  v-if="turn.thinking || turn.markdown || turn.streaming"
+                  class="chat-bubble chat-bubble--ai"
+                >
+                  <pre
+                    v-if="turn.streaming && turn.markdown"
+                    class="guide-stream-raw"
+                  >{{ turn.markdown }}</pre>
+                  <div
+                    v-else-if="turnHtml(turn.markdown)"
+                    class="guide-md"
+                    v-html="turnHtml(turn.markdown)"
+                  />
+                  <span
+                    v-if="turn.streaming && turn.markdown && aiLoading === 'tutor'"
+                    class="guide-caret"
+                  />
+                </div>
+              </div>
+            </template>
+          </article>
         </div>
       </div>
       <div class="guide-ask">
