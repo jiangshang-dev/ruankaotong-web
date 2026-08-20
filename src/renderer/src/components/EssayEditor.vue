@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '../stores/app'
+import { AuthRequiredError, AccountDisabledError } from '../api/auth'
 import {
   extractMarkdownSection,
   firstMarkdownHeading,
@@ -156,7 +157,7 @@ async function load(): Promise<void> {
 }
 
 async function loadGuideHistory(fileName: string): Promise<void> {
-  if (!fileName) {
+  if (!fileName || !store.aiLoggedIn) {
     guideHistory.value = []
     return
   }
@@ -168,6 +169,10 @@ async function loadGuideHistory(fileName: string): Promise<void> {
     }
   } catch (e) {
     guideHistory.value = []
+    if (e instanceof AuthRequiredError || e instanceof AccountDisabledError) {
+      if (e instanceof AccountDisabledError) store.consumeAiAuthError(e)
+      return
+    }
     status.value = e instanceof Error ? e.message : '读取指导历史失败'
   }
 }
@@ -198,6 +203,13 @@ watch(
     void load()
   },
   { immediate: true },
+)
+
+watch(
+  () => store.clientEmail,
+  () => {
+    if (historyFileName.value) void loadGuideHistory(historyFileName.value)
+  },
 )
 
 function markDirty(): void {
@@ -285,6 +297,8 @@ function buildAiPayload(part: PolishPart) {
     part,
     abstractText: abstractText.value,
     bodyText: body.value,
+    subjectId: store.subjectId,
+    fileName: historyFileName.value,
   }
 }
 
@@ -314,6 +328,7 @@ function toggleHistory(): void {
 }
 
 async function runGuide(): Promise<void> {
+  if (!(await store.requireAiLogin())) return
   abortGuideStream()
   guideCollapsed.value = false
   generatingGuide.value = true
@@ -363,6 +378,10 @@ async function runGuide(): Promise<void> {
       status.value = '已停止生成指导'
       return
     }
+    if (store.consumeAiAuthError(e)) {
+      status.value = e instanceof Error ? e.message : '请先登录后再使用 AI'
+      return
+    }
     status.value = e instanceof Error ? e.message : '指导失败'
   } finally {
     if (guideAbort && !guideAbort.signal.aborted) {
@@ -392,6 +411,7 @@ function applyBodyOutline(): void {
 }
 
 async function runPolish(part: PolishPart): Promise<void> {
+  if (!(await store.requireAiLogin())) return
   if (!extractEssayTitle(topic.value) && !stripCaseTopicText(topic.value).trim()) {
     status.value = '请先填写论文题目'
     return
@@ -446,6 +466,10 @@ async function runPolish(part: PolishPart): Promise<void> {
     polishOpen.value = true
     status.value = 'AI 润色完成，请确认是否接受'
   } catch (e) {
+    if (store.consumeAiAuthError(e)) {
+      status.value = e instanceof Error ? e.message : '请先登录后再使用 AI'
+      return
+    }
     status.value = e instanceof Error ? e.message : '润色失败'
   } finally {
     aiLoading.value = ''
@@ -475,6 +499,7 @@ function closePolish(): void {
 }
 
 async function runScore(): Promise<void> {
+  if (!(await store.requireAiLogin())) return
   if (!extractEssayTitle(topic.value) && !stripCaseTopicText(topic.value).trim()) {
     status.value = '请先填写论文题目'
     return
@@ -491,11 +516,17 @@ async function runScore(): Promise<void> {
       topic: stripCaseTopicText(topic.value).trim() || extractEssayTitle(topic.value),
       abstractText: abstractText.value,
       bodyText: body.value,
+      subjectId: store.subjectId,
+      fileName: historyFileName.value,
     })
     scoreResult.value = res
     scoreOpen.value = true
     status.value = `AI 评分完成：${res.totalScore} 分（${res.level || '-'}）`
   } catch (e) {
+    if (store.consumeAiAuthError(e)) {
+      status.value = e instanceof Error ? e.message : '请先登录后再使用 AI'
+      return
+    }
     status.value = e instanceof Error ? e.message : '评分失败'
   } finally {
     aiLoading.value = ''
@@ -527,6 +558,18 @@ onBeforeUnmount(() => {
     <div class="editor-toolbar" style="padding: 0; border: none">
       <div class="status">{{ status }}{{ dirty ? ' · 未保存' : '' }}</div>
       <div class="actions">
+        <button v-if="!store.aiLoggedIn" class="btn light" type="button" @click="store.openAiLogin">
+          登录
+        </button>
+        <button
+          v-else
+          class="btn light"
+          type="button"
+          :title="store.clientEmail"
+          @click="store.openProfile"
+        >
+          {{ store.clientName || '个人中心' }}
+        </button>
         <button
           class="btn light"
           :disabled="!!aiLoading"

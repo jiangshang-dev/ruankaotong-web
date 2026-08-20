@@ -1,6 +1,4 @@
-const AI_BASE =
-  (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_AI_BASE_URL ||
-  'http://127.0.0.1:9001'
+import { AI_BASE, authHeaders, readApiError, throwIfAiAuthFailed } from './auth'
 
 export interface CaseImage {
   mimeType: string
@@ -40,9 +38,10 @@ export interface CaseScoreResponse {
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${AI_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   })
+  await throwIfAiAuthFailed(res)
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     const msg =
@@ -101,6 +100,8 @@ export function scoreCase(payload: {
   topicText: string
   answerText: string
   images: CaseImage[]
+  subjectId?: string
+  fileName?: string
 }): Promise<CaseScoreResponse> {
   return postJson('/api/ai/case/score', payload)
 }
@@ -151,7 +152,10 @@ export async function listCaseExplainHistory(
     subjectId: subjectId || '',
     fileName: fileName || '',
   })
-  const res = await fetch(`${AI_BASE}/api/ai/case/explain/history?${params}`)
+  const res = await fetch(`${AI_BASE}/api/ai/case/explain/history?${params}`, {
+    headers: authHeaders(),
+  })
+  await throwIfAiAuthFailed(res)
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     const msg =
@@ -179,20 +183,16 @@ export async function streamCaseExplain(
 ): Promise<CaseExplainHistoryRecord> {
   const res = await fetch(`${AI_BASE}/api/ai/case/explain/stream`, {
     method: 'POST',
-    headers: {
+    headers: authHeaders({
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
-    },
+    }),
     body: JSON.stringify(payload),
     signal,
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    const msg =
-      typeof data === 'object' && data && 'message' in data
-        ? String((data as { message: string }).message)
-        : `请求失败 (${res.status})`
-    throw new Error(msg)
+    await throwIfAiAuthFailed(res)
+    throw new Error(await readApiError(res))
   }
   const readableStream = res.body
   if (!(readableStream instanceof ReadableStream)) {

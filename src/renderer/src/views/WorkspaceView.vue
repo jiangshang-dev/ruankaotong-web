@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { SUBJECTS } from '../data/subjects'
 import { useAppStore } from '../stores/app'
 import NoteEditor from '../components/NoteEditor.vue'
 import EssayEditor from '../components/EssayEditor.vue'
 import CaseEditor from '../components/CaseEditor.vue'
+import LoginModal from '../components/LoginModal.vue'
+import ProfileModal from '../components/ProfileModal.vue'
 import { formatDate } from '../utils/exam'
 
 const store = useAppStore()
@@ -150,7 +151,7 @@ async function onDragEnd(): Promise<void> {
       <div class="section-label">学科</div>
       <div class="subject-list">
         <button
-          v-for="s in SUBJECTS"
+          v-for="s in store.subjects"
           :key="s.id"
           class="subject-item"
           :class="{ active: store.subjectId === s.id }"
@@ -193,6 +194,13 @@ async function onDragEnd(): Promise<void> {
           >
             案例分析
           </button>
+        </div>
+        <div class="account-box">
+          <template v-if="store.aiLoggedIn">
+            <span class="account-nick" :title="store.clientEmail">{{ store.clientName || '考生' }}</span>
+            <button class="btn light" type="button" @click="store.openProfile">个人中心</button>
+          </template>
+          <button v-else class="btn light" type="button" @click="store.openAiLogin">登录</button>
         </div>
       </header>
 
@@ -307,4 +315,6 @@ async function onDragEnd(): Promise<void> {
       </div>
     </main>
   </div>
+  <LoginModal />
+  <ProfileModal />
 </template>

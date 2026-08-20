@@ -1,6 +1,4 @@
-const AI_BASE =
-  (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_AI_BASE_URL ||
-  'http://127.0.0.1:9001'
+import { AI_BASE, authHeaders, readApiError, throwIfAiAuthFailed } from './auth'
 
 export type PolishPart = 'abstract' | 'body' | 'all'
 
@@ -10,6 +8,8 @@ export interface EssayPolishRequest {
   part: PolishPart
   abstractText: string
   bodyText: string
+  subjectId?: string
+  fileName?: string
 }
 
 export interface EssayPolishResponse {
@@ -39,9 +39,10 @@ export interface EssayScoreResponse {
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${AI_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   })
+  await throwIfAiAuthFailed(res)
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     const msg =
@@ -62,6 +63,8 @@ export function scoreEssay(payload: {
   topic: string
   abstractText: string
   bodyText: string
+  subjectId?: string
+  fileName?: string
 }): Promise<EssayScoreResponse> {
   return postJson('/api/ai/essay/score', payload)
 }
@@ -170,7 +173,10 @@ export async function listEssayGuideHistory(
     subjectId: subjectId || '',
     fileName: fileName || '',
   })
-  const res = await fetch(`${AI_BASE}/api/ai/essay/guide/history?${params}`)
+  const res = await fetch(`${AI_BASE}/api/ai/essay/guide/history?${params}`, {
+    headers: authHeaders(),
+  })
+  await throwIfAiAuthFailed(res)
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     const msg =
@@ -198,20 +204,16 @@ export async function streamEssayGuide(
 ): Promise<EssayGuideHistoryRecord> {
   const res = await fetch(`${AI_BASE}/api/ai/essay/guide/stream`, {
     method: 'POST',
-    headers: {
+    headers: authHeaders({
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
-    },
+    }),
     body: JSON.stringify(payload),
     signal,
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    const msg =
-      typeof data === 'object' && data && 'message' in data
-        ? String((data as { message: string }).message)
-        : `请求失败 (${res.status})`
-    throw new Error(msg)
+    await throwIfAiAuthFailed(res)
+    throw new Error(await readApiError(res))
   }
   const readableStream = res.body
   if (!(readableStream instanceof ReadableStream)) {

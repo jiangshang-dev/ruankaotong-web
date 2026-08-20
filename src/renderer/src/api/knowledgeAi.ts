@@ -1,6 +1,4 @@
-const AI_BASE =
-  (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_AI_BASE_URL ||
-  'http://127.0.0.1:9001'
+import { AI_BASE, authHeaders, readApiError, throwIfAiAuthFailed } from './auth'
 
 export interface KnowledgeTutorHistoryRecord {
   id: string
@@ -55,14 +53,17 @@ export async function listKnowledgeTutorHistory(
     subjectId: subjectId || '',
     fileName: fileName || '',
   })
-  const res = await fetch(`${AI_BASE}/api/ai/knowledge/tutor/history?${params}`)
+  const res = await fetch(`${AI_BASE}/api/ai/knowledge/tutor/history?${params}`, {
+    headers: authHeaders(),
+  })
+  await throwIfAiAuthFailed(res)
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    const msg =
+    throw new Error(await Promise.resolve(
       typeof data === 'object' && data && 'message' in data
         ? String((data as { message: string }).message)
-        : `请求失败 (${res.status})`
-    throw new Error(msg)
+        : `请求失败 (${res.status})`,
+    ))
   }
   const records = (data as { records?: KnowledgeTutorHistoryRecord[] }).records
   return Array.isArray(records) ? records : []
@@ -84,19 +85,17 @@ export async function streamKnowledgeTutor(
   const res = await fetch(`${AI_BASE}/api/ai/knowledge/tutor/stream`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
+      ...authHeaders({
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      }),
     },
     body: JSON.stringify(payload),
     signal,
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    const msg =
-      typeof data === 'object' && data && 'message' in data
-        ? String((data as { message: string }).message)
-        : `请求失败 (${res.status})`
-    throw new Error(msg)
+    await throwIfAiAuthFailed(res)
+    throw new Error(await readApiError(res))
   }
   const readableStream = res.body
   if (!(readableStream instanceof ReadableStream)) {

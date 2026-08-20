@@ -275,6 +275,24 @@ button {
   padding: 3px;
 }
 
+.account-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.account-nick {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brand-dark);
+}
+
 .tab {
   border: none;
   background: transparent;
@@ -1847,4 +1865,57 @@ button {
   .score-lists {
     grid-template-columns: 1fr;
   }
+}
+
+.login-modal {
+  width: min(440px, 100%);
+}
+
+.login-hint,
+.login-error {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.login-error {
+  color: var(--danger);
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.login-field label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.login-field input {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.login-code-row {
+  display: flex;
+  gap: 8px;
+}
+
+.login-code-row input {
+  flex: 1;
+}
+
+.login-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.profile-actions {
+  justify-content: space-between;
 }

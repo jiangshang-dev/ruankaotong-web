@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '../stores/app'
+import { AuthRequiredError, AccountDisabledError } from '../api/auth'
 import {
   compressImageDataUrl,
   extractMarkdownSection,
@@ -118,7 +119,7 @@ async function load(): Promise<void> {
 }
 
 async function loadExplainHistory(fileName: string): Promise<void> {
-  if (!fileName) {
+  if (!fileName || !store.aiLoggedIn) {
     explainHistory.value = []
     return
   }
@@ -130,6 +131,10 @@ async function loadExplainHistory(fileName: string): Promise<void> {
     }
   } catch (e) {
     explainHistory.value = []
+    if (e instanceof AuthRequiredError || e instanceof AccountDisabledError) {
+      if (e instanceof AccountDisabledError) store.consumeAiAuthError(e)
+      return
+    }
     status.value = e instanceof Error ? e.message : '读取讲解历史失败'
   }
 }
@@ -160,6 +165,13 @@ watch(
     void load()
   },
   { immediate: true },
+)
+
+watch(
+  () => store.clientEmail,
+  () => {
+    if (historyFileName.value) void loadExplainHistory(historyFileName.value)
+  },
 )
 
 function markDirty(): void {
@@ -246,6 +258,7 @@ function toggleHistory(): void {
 }
 
 async function runExplain(): Promise<void> {
+  if (!(await store.requireAiLogin())) return
   abortExplainStream()
   guideCollapsed.value = false
   generatingExplain.value = true
@@ -296,6 +309,10 @@ async function runExplain(): Promise<void> {
       status.value = '已停止生成讲解'
       return
     }
+    if (store.consumeAiAuthError(e)) {
+      status.value = e instanceof Error ? e.message : '请先登录后再使用 AI'
+      return
+    }
     status.value = e instanceof Error ? e.message : '讲解失败'
   } finally {
     if (explainAbort && !explainAbort.signal.aborted) {
@@ -316,6 +333,7 @@ function applyAnswerDraft(): void {
 }
 
 async function runScore(): Promise<void> {
+  if (!(await store.requireAiLogin())) return
   if (!answer.value.trim()) {
     status.value = '请先按题号填写答案再评分'
     return
@@ -335,11 +353,17 @@ async function runScore(): Promise<void> {
       topicText,
       answerText: answer.value,
       images,
+      subjectId: store.subjectId,
+      fileName: historyFileName.value,
     })
     scoreResult.value = res
     scoreOpen.value = true
     status.value = `AI 评分完成：${res.totalScore} 分（${res.level || '-'}）`
   } catch (e) {
+    if (store.consumeAiAuthError(e)) {
+      status.value = e instanceof Error ? e.message : '请先登录后再使用 AI'
+      return
+    }
     status.value = e instanceof Error ? e.message : '评分失败'
   } finally {
     aiLoading.value = ''
@@ -371,6 +395,18 @@ onBeforeUnmount(() => {
     <div class="editor-toolbar" style="padding: 0; border: none">
       <div class="status">{{ status }}{{ dirty ? ' · 未保存' : '' }}</div>
       <div class="actions">
+        <button v-if="!store.aiLoggedIn" class="btn light" type="button" @click="store.openAiLogin">
+          登录
+        </button>
+        <button
+          v-else
+          class="btn light"
+          type="button"
+          :title="store.clientEmail"
+          @click="store.openProfile"
+        >
+          {{ store.clientName || '个人中心' }}
+        </button>
         <button class="btn light" :disabled="!!aiLoading" @click="runExplain">
           {{ aiLoading === 'explain' ? '讲解中…' : 'AI 讲解' }}
         </button>

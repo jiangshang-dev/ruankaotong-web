@@ -21,6 +21,6 @@ export const SUBJECTS: Subject[] = [
   { id: 'network-admin', name: '网络管理员', shortName: '网管', level: '初级', color: '#64748b' },
 ]
 
-export function getSubject(id: string): Subject {
-  return SUBJECTS.find((s) => s.id === id) || SUBJECTS[0]
+export function getSubject(id: string, list: Subject[] = SUBJECTS): Subject {
+  return list.find((s) => s.id === id) || list[0] || SUBJECTS[0]
 }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '../stores/app'
+import { AuthRequiredError, AccountDisabledError } from '../api/auth'
 import {
   extractUserQuestion,
   firstMarkdownHeading,
@@ -164,7 +165,7 @@ async function load(): Promise<void> {
 }
 
 async function loadTutorHistory(fileName: string, replaceThread = true): Promise<void> {
-  if (!fileName) {
+  if (!fileName || !store.aiLoggedIn) {
     tutorHistory.value = []
     if (replaceThread) tutorTurns.value = []
     return
@@ -181,6 +182,10 @@ async function loadTutorHistory(fileName: string, replaceThread = true): Promise
     if (replaceThread) {
       tutorHistory.value = []
       tutorTurns.value = []
+    }
+    if (e instanceof AuthRequiredError || e instanceof AccountDisabledError) {
+      if (e instanceof AccountDisabledError) store.consumeAiAuthError(e)
+      return
     }
     status.value = e instanceof Error ? e.message : '读取辅导历史失败'
   }
@@ -214,6 +219,13 @@ watch(
     void load()
   },
   { immediate: true },
+)
+
+watch(
+  () => store.clientEmail,
+  () => {
+    if (historyFileName.value) void loadTutorHistory(historyFileName.value)
+  },
 )
 
 function markDirty(): void {
@@ -323,6 +335,7 @@ function onSplitDown(e: MouseEvent): void {
 }
 
 async function runTutor(question = '', followUp = false): Promise<void> {
+  if (!(await store.requireAiLogin())) return
   const q = question.trim()
   if (!title.value.trim() && !body.value.trim() && !q) {
     status.value = '请先写笔记标题或正文，或输入要问的问题'
@@ -395,6 +408,10 @@ async function runTutor(question = '', followUp = false): Promise<void> {
       status.value = '已停止生成辅导'
       return
     }
+    if (store.consumeAiAuthError(e)) {
+      status.value = e instanceof Error ? e.message : '请先登录后再使用 AI'
+      return
+    }
     status.value = e instanceof Error ? e.message : '辅导失败'
   } finally {
     if (tutorAbort && !tutorAbort.signal.aborted) {
@@ -461,6 +478,18 @@ onBeforeUnmount(() => {
     <div class="editor-toolbar" style="padding: 0; border: none">
       <div class="status">{{ status }}{{ dirty ? ' · 未保存' : '' }}</div>
       <div class="actions">
+        <button v-if="!store.aiLoggedIn" class="btn light" type="button" @click="store.openAiLogin">
+          登录
+        </button>
+        <button
+          v-else
+          class="btn light"
+          type="button"
+          :title="store.clientEmail"
+          @click="store.openProfile"
+        >
+          {{ store.clientName || '个人中心' }}
+        </button>
         <button class="btn light" :disabled="!!aiLoading" @click="runTutor()">
           {{ aiLoading === 'tutor' ? '辅导中…' : 'AI 辅导' }}
         </button>
