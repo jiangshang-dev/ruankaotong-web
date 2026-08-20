@@ -1,4 +1,4 @@
-# 软考通
+# 软考智笔
 
 本地软考备考笔记桌面端：Vue 3 + TypeScript + Electron。无需登录，笔记按学科保存为 Markdown。
 

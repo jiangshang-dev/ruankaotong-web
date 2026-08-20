@@ -39,7 +39,7 @@
   },
   "build": {
     "appId": "com.ruankaotong.app",
-    "productName": "软考通",
+    "productName": "软考智笔",
     "directories": {
       "output": "release"
     },

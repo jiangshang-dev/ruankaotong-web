@@ -12,7 +12,7 @@ onMounted(() => {
 <template>
   <div v-if="!store.ready" class="welcome">
     <div class="welcome-card">
-      <h2>软考通</h2>
+      <h2>软考智笔</h2>
       <p>正在加载本地配置…</p>
     </div>
   </div>

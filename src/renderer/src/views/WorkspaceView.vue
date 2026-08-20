@@ -124,7 +124,7 @@ async function onDragEnd(): Promise<void> {
     <aside class="sidebar">
       <div class="sidebar-top">
         <div class="brand">
-          <h1>软考通</h1>
+          <h1>软考智笔</h1>
           <p>本地 Markdown 备考笔记</p>
         </div>
 

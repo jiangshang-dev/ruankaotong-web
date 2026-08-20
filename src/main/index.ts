@@ -32,7 +32,7 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 640,
     show: false,
-    title: '软考通',
+    title: '软考智笔',
     backgroundColor: '#f4f7f5',
     autoHideMenuBar: true,
     webPreferences: {
