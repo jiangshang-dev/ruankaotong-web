@@ -3,7 +3,7 @@
 本地软考备考笔记桌面端：Vue 3 + TypeScript + Electron。无需登录，笔记按学科保存为 Markdown。
 
 ## 后端服务
-[后端服务](https://github.com/jiangshang-dev/ruankaotong-service)
+[后端AI服务源码](https://github.com/jiangshang-dev/ruankaotong-service)
 
 ## 界面截图
 <img width="1512" height="859" alt="image" src="https://github.com/user-attachments/assets/0261f58f-b6d1-4d45-a7a0-c7d011b87b97" />
