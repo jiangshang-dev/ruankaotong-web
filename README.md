@@ -2,6 +2,9 @@
 
 本地软考备考笔记桌面端：Vue 3 + TypeScript + Electron。无需登录，笔记按学科保存为 Markdown。
 
+## 后端服务
+![](https://github.com/jiangshang-dev/ruankaotong-service)
+
 ## 功能
 
 - **分学科**：架构、高项、软设、网工等常见科目切换
