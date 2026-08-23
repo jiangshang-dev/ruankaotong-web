@@ -5,6 +5,12 @@
 ## 后端服务
 [后端服务](https://github.com/jiangshang-dev/ruankaotong-service)
 
+## 界面截图
+<img width="1512" height="859" alt="image" src="https://github.com/user-attachments/assets/0261f58f-b6d1-4d45-a7a0-c7d011b87b97" />
+<img width="1512" height="859" alt="image" src="https://github.com/user-attachments/assets/b00bb46c-52ea-47f0-ab3e-cfda81b3b387" />
+<img width="1512" height="859" alt="image" src="https://github.com/user-attachments/assets/1c41fe7a-5093-448c-937b-69db6a879ad8" />
+
+
 ## 功能
 
 - **分学科**：架构、高项、软设、网工等常见科目切换
